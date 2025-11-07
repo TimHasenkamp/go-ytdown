@@ -1,33 +1,14 @@
 services:
-  # PO Token Provider für yt-dlp (umgeht SABR-Probleme)
-  bgutil-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider:latest
-    container_name: bgutil-provider
-    ports:
-      - "4416:4416"
-    restart: unless-stopped
-
   ytdownloader:
-    build: .
+    image: ghcr.io/timhasenkamp/go-ytdown:latest
     container_name: ytdownloader
     ports:
       - "8080:8080"
     volumes:
-      # Downloads werden auf dem Host gespeichert
-      # Option 1: Im Projektordner (Standard)
       - ./downloads:/app/downloads
-
-      # Option 2: Direkt in Windows Downloads-Ordner (auskommentiert)
-      # Ersetze 'tim' mit deinem Windows-Benutzernamen!
-      # - C:/Users/tim/Downloads:/app/downloads
     restart: unless-stopped
     environment:
-      # Optional: Umgebungsvariablen für yt-dlp
       - TZ=Europe/Berlin
-      # PO Token Provider URL
-      - BGUTIL_PROVIDER_URL=http://bgutil-provider:4416
-    depends_on:
-      - bgutil-provider
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
       interval: 30s

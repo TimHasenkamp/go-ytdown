@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod init:*)",
+      "Bash(mkdir:*)",
+      "Bash(yt-dlp:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(podman compose:*)",
+      "Bash(podman logs:*)",
+      "Bash(npm install:*)",
+      "Bash(podman exec bgutil-provider sh -c:*)",
+      "Bash(podman ps:*)",
+      "Bash(podman exec ytdownloader sh -c \"yt-dlp --version && echo ''---'' && python3 -m pip list | grep bgutil\")",
+      "Bash(podman exec ytdownloader sh -c \"wget -q -O- http://bgutil-provider:4416 2>&1 | head -5 || echo ''Connection successful (404 expected)''\")",
+      "Bash(podman exec ytdownloader sh -c \"echo ''Testing provider connection...'' && timeout 3 nc -zv bgutil-provider 4416 2>&1 || echo ''Provider is reachable!''\")",
+      "Bash(podman exec ytdownloader sh -c \"yt-dlp --verbose --list-extractors 2>&1 | grep -i pot || yt-dlp -v ''https://www.youtube.com/watch?v=jNQXAC9IVRw'' --skip-download 2>&1 | grep -i ''bgutil\\|pot\\|provider'' | head -10\")",
+      "Bash(podman exec:*)",
+      "Bash(podman inspect:*)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

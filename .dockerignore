@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Downloads (werden via Volume gemounted)
+downloads/*
+!downloads/.gitkeep
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+DOCKER.md
+PODMAN.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+*.test
+*.out
+
+# Node
+frontend/node_modules
+frontend/build
+frontend/dist
+frontend/.vite
+frontend/.cache
+
+# Old static files
+static/

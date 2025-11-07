@@ -1,0 +1,101 @@
+# -----------------------------
+# OS & allgemeines
+# -----------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Env-Dateien (Beispiele committen, echte Secrets nicht)
+.envac
+.env.*
+!.env.example
+!.env*.example
+
+# -----------------------------
+# Go / Backend
+# Gilt repo-weit und für z.B. ./backend, ./server, etc.
+# -----------------------------
+# Build-Outputs / Binaries
+bin/
+**/bin/
+build/
+**/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Test-/Coverage-Artefakte
+*.cover
+coverage.txt
+cover.out
+
+# Go workspaces (falls du sie nicht committen willst)
+go.work
+go.work.sum
+
+# Vendored deps (falls du NICHT vendoren möchtest; sonst auskommentieren)
+vendor/
+
+# -----------------------------
+# Node / Frontend (React + Vite + Tailwind)
+# Gilt repo-weit und für z.B. ./frontend, ./web, etc.
+# -----------------------------
+# Paket-Caches & Artefakte
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+
+# Vite & Tooling Caches
+.vite/
+**/.vite/
+.eslintcache
+**/.eslintcache
+.stylelintcache
+**/.cache/
+.parcel-cache/
+
+# TypeScript
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Tailwind / PostCSS
+# (Configs committen! Nur evtl. Caches ignorieren)
+.tailwind-cache/
+.postcss-cache/
+
+# Storybook (falls verwendet)
+.storybook-out/
+storybook-static/
+
+# -----------------------------
+# IDE/Editor
+# -----------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# -----------------------------
+# Container/CI (optional; auskommentieren falls benötigt)
+# -----------------------------
+# docker-compose.override.yml
+# .env.docker

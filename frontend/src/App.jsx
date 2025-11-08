@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { gsap } from 'gsap'
 import { Video, Music, FileAudio, Headphones, Rocket, Loader2, Info, Check, CheckCircle, XCircle, AlertTriangle, X } from 'lucide-react'
@@ -38,7 +38,7 @@ function App() {
   }
 
   // Send error report to backend
-  const reportError = async (error, context = {}) => {
+  const reportError = useCallback(async (error, context = {}) => {
     try {
       const errorReport = {
         errorMessage: error.message || String(error),
@@ -66,14 +66,17 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(errorReport)
       })
+
+      console.log('[ErrorReport] Error report sent successfully')
     } catch (err) {
       console.error('[ErrorReport] Failed to send error report:', err)
     }
-  }
+  }, [])
 
   // Global error handler
   useEffect(() => {
     const handleError = (event) => {
+      console.log('[ErrorHandler] Caught error:', event)
       reportError(event.error || new Error(event.message), {
         type: 'uncaught_error',
         filename: event.filename,
@@ -83,6 +86,7 @@ function App() {
     }
 
     const handleUnhandledRejection = (event) => {
+      console.log('[ErrorHandler] Caught unhandled rejection:', event)
       reportError(event.reason || new Error('Unhandled Promise Rejection'), {
         type: 'unhandled_rejection'
       })
@@ -91,11 +95,14 @@ function App() {
     window.addEventListener('error', handleError)
     window.addEventListener('unhandledrejection', handleUnhandledRejection)
 
+    console.log('[ErrorHandler] Global error handlers registered')
+
     return () => {
       window.removeEventListener('error', handleError)
       window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+      console.log('[ErrorHandler] Global error handlers removed')
     }
-  }, [])
+  }, [reportError])
 
   // Validate if URL is from YouTube
   const isValidYouTubeURL = (url) => {
@@ -327,6 +334,12 @@ function App() {
         },
         body: JSON.stringify({ url, format }),
       })
+
+      // Check if response is OK
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
 
       const data = await response.json()
 

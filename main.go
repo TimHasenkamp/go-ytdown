@@ -115,11 +115,15 @@ func main() {
 	http.HandleFunc("/check-formats", handleCheckFormats)
 	http.HandleFunc("/resolve", handleResolve)
 	http.HandleFunc("/report-error", handleErrorReport)
+	http.HandleFunc("/test-slack", handleTestSlack) // Test endpoint for Slack notifications
 
 	// Check if yt-dlp is installed
 	if err := checkYtDlp(); err != nil {
 		log.Printf("Warning: yt-dlp not found. Please install it: %v", err)
 	}
+
+	// Send startup notification to Slack
+	go sendStartupNotification()
 
 	port := "8080"
 	log.Printf("Server starting on http://localhost:%s", port)
@@ -742,6 +746,14 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 	if err := cmd.Wait(); err != nil {
 		errorMsg := stderrOutput.String()
 
+		// Report to Slack for critical errors
+		reportBackendError(fmt.Sprintf("yt-dlp failed: %v", err), map[string]string{
+			"url":     url,
+			"format":  format,
+			"session": sessionID,
+			"stderr":  truncateString(errorMsg, 500),
+		})
+
 		// Check for specific error conditions
 		if strings.Contains(errorMsg, "Requested format is not available") {
 			return "", fmt.Errorf("Das gewählte Format ist für dieses Video nicht verfügbar. Versuche ein anderes Format.")
@@ -1014,6 +1026,30 @@ func sendJSONResponse(w http.ResponseWriter, response DownloadResponse) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// reportBackendError sends backend errors to Slack automatically
+func reportBackendError(errorMsg string, context map[string]string) {
+	if slackWebhookURL == "" {
+		return // Silently skip if not configured
+	}
+
+	go func() {
+		report := ErrorReport{
+			ErrorMessage: errorMsg,
+			ErrorStack:   "",
+			URL:          "Backend Error",
+			UserAgent:    "Go Backend",
+			Timestamp:    time.Now().Format(time.RFC3339),
+			SessionID:    "backend-" + time.Now().Format("20060102-150405"),
+			LastActions:  []string{},
+			BrowserInfo:  context,
+		}
+
+		if err := sendSlackNotification(report); err != nil {
+			log.Printf("[BackendError] Failed to send Slack notification: %v", err)
+		}
+	}()
+}
+
 // sendSlackNotification sends a formatted error report to Slack
 func sendSlackNotification(report ErrorReport) error {
 	if slackWebhookURL == "" {
@@ -1159,4 +1195,127 @@ func handleErrorReport(w http.ResponseWriter, r *http.Request) {
 	// Respond to frontend
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// sendStartupNotification sends a notification to Slack when the service starts
+func sendStartupNotification() {
+	if slackWebhookURL == "" {
+		log.Printf("[Startup] SLACK_WEBHOOK_URL not configured, skipping startup notification")
+		return
+	}
+
+	// Get hostname
+	hostname, _ := os.Hostname()
+
+	// Get yt-dlp version
+	ytdlpVersion := "unknown"
+	cmd := exec.Command("yt-dlp", "--version")
+	if output, err := cmd.Output(); err == nil {
+		ytdlpVersion = strings.TrimSpace(string(output))
+	}
+
+	message := SlackMessage{
+		Text: "✅ YouTube Downloader gestartet",
+		Attachments: []SlackAttachment{
+			{
+				Color: "good",
+				Fields: []SlackField{
+					{
+						Title: "Status",
+						Value: "🚀 Service läuft wieder",
+						Short: true,
+					},
+					{
+						Title: "Hostname",
+						Value: hostname,
+						Short: true,
+					},
+					{
+						Title: "Timestamp",
+						Value: time.Now().Format("2006-01-02 15:04:05 MST"),
+						Short: true,
+					},
+					{
+						Title: "yt-dlp Version",
+						Value: ytdlpVersion,
+						Short: true,
+					},
+				},
+			},
+		},
+	}
+
+	payload, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("[Startup] Failed to marshal Slack message: %v", err)
+		return
+	}
+
+	resp, err := http.Post(slackWebhookURL, "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		log.Printf("[Startup] Failed to send Slack notification: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[Startup] Slack returned status %d: %s", resp.StatusCode, string(body))
+		return
+	}
+
+	log.Printf("[Startup] Startup notification sent to Slack")
+}
+
+// handleTestSlack is a test endpoint to verify Slack notifications work
+func handleTestSlack(w http.ResponseWriter, r *http.Request) {
+	if slackWebhookURL == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "SLACK_WEBHOOK_URL not configured",
+		})
+		return
+	}
+
+	// Create a test error report
+	testReport := ErrorReport{
+		ErrorMessage: "Test Error Report - Slack Integration Test",
+		ErrorStack:   "at handleTestSlack (main.go:1250)\nat http.HandlerFunc.ServeHTTP (net/http/server.go:2136)",
+		URL:          "https://music.hasenkamp.dev/test-slack",
+		UserAgent:    r.Header.Get("User-Agent"),
+		Timestamp:    time.Now().Format(time.RFC3339),
+		SessionID:    "test-session-" + time.Now().Format("20060102-150405"),
+		LastActions: []string{
+			"[Test] User navigated to /test-slack",
+			"[Test] Triggered manual Slack test",
+			"[Test] Generating test error report",
+		},
+		BrowserInfo: map[string]string{
+			"name":    "Test Browser",
+			"version": "1.0.0",
+			"os":      "Test OS",
+		},
+	}
+
+	log.Printf("[TestSlack] Sending test notification to Slack...")
+
+	// Send to Slack
+	if err := sendSlackNotification(testReport); err != nil {
+		log.Printf("[TestSlack] Failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("Failed to send to Slack: %v", err),
+		})
+		return
+	}
+
+	log.Printf("[TestSlack] Test notification sent successfully!")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Test notification sent to Slack! Check your channel.",
+	})
 }

@@ -154,6 +154,10 @@ form {
   gap: 12px;
 }
 
+.format-selection {
+  margin-bottom: 32px;
+}
+
 label {
   color: #e4e4e7;
   font-weight: 500;
@@ -561,51 +565,83 @@ label {
 /* Responsive */
 @media (max-width: 768px) {
   .app {
-    padding: 80px 15px 20px;
+    padding: 20px 15px 15px;
+    min-height: 100vh;
+    min-height: 100dvh; /* Dynamic viewport height for mobile browsers */
+    display: flex;
+    align-items: center;
   }
 
   .container {
-    padding: 32px 20px;
+    padding: 24px 18px;
     border-radius: 16px;
+    width: 100%;
+  }
+
+  .header {
+    margin-bottom: 24px;
   }
 
   .title-gradient {
-    font-size: 2.2em;
+    font-size: 1.8em;
     letter-spacing: -1px;
+    margin-bottom: 8px;
   }
 
   .subtitle {
-    font-size: 0.95em;
-  }
-
-
-  .format-icon {
-    font-size: 2.5em;
-  }
-
-  .format-label {
-    font-size: 1em;
-  }
-
-  .format-desc {
-    font-size: 0.8em;
-  }
-
-  .submit-button {
-    padding: 16px 32px;
-    font-size: 1em;
-  }
-
-  .progress-percentage {
-    font-size: 1.75em;
-  }
-
-  label {
     font-size: 0.85em;
   }
 
+  form {
+    gap: 20px;
+  }
+
+  .form-group {
+    margin-bottom: 0 !important;
+  }
+
+  .format-selection {
+    margin-bottom: 20px !important;
+  }
+
+  .format-grid {
+    gap: 8px;
+  }
+
+  .format-card {
+    padding: 12px 8px;
+  }
+
+  .format-icon {
+    font-size: 2em;
+    margin-bottom: 6px;
+  }
+
+  .format-label {
+    font-size: 0.9em;
+    margin-bottom: 2px;
+  }
+
+  .format-desc {
+    font-size: 0.7em;
+  }
+
+  .submit-button {
+    padding: 14px 28px;
+    font-size: 0.95em;
+  }
+
+  .progress-percentage {
+    font-size: 1.5em;
+  }
+
+  label {
+    font-size: 0.8em;
+    margin-bottom: 8px;
+  }
+
   .animated-input {
-    padding: 14px 16px;
+    padding: 12px 14px;
     font-size: 16px;
   }
 
@@ -624,39 +660,58 @@ label {
 
 @media (max-width: 480px) {
   .app {
-    padding: 15px 10px;
+    padding: 15px 10px 10px;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   .container {
-    padding: 24px 16px;
+    padding: 20px 14px;
+  }
+
+  .header {
+    margin-bottom: 20px;
   }
 
   .title-gradient {
-    font-size: 1.8em;
+    font-size: 1.5em;
     letter-spacing: 0;
+    margin-bottom: 6px;
   }
 
   .subtitle {
-    font-size: 0.9em;
+    font-size: 0.8em;
+  }
+
+  form {
+    gap: 16px;
+  }
+
+  .format-selection {
+    margin-bottom: 16px !important;
   }
 
   .format-grid {
     grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    gap: 8px;
   }
 
+  .format-card {
+    padding: 10px 6px;
+  }
 
   .format-icon {
-    font-size: 2.2em;
-    margin-bottom: 8px;
+    font-size: 1.8em;
+    margin-bottom: 4px;
   }
 
   .format-label {
-    font-size: 0.95em;
+    font-size: 0.85em;
+    margin-bottom: 2px;
   }
 
   .format-desc {
-    font-size: 0.75em;
+    font-size: 0.65em;
   }
 
   .selected-badge {

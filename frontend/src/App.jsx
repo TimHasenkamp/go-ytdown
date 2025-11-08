@@ -239,31 +239,34 @@ function App() {
         .join('')
     }
 
+    // Check if mobile device
+    const isMobile = window.innerWidth <= 768
+
     const ctx = gsap.context(() => {
-      // Split text animation
+      // Split text animation - no opacity on mobile
       gsap.from('.char', {
-        duration: 0.6,
-        opacity: 0,
-        y: 40,
-        stagger: 0.03,
+        duration: isMobile ? 0.3 : 0.6,
+        opacity: isMobile ? 1 : 0,
+        y: isMobile ? 0 : 40,
+        stagger: isMobile ? 0 : 0.03,
         ease: 'power3.out',
       })
 
-      // Container animation
+      // Container animation - no opacity on mobile
       gsap.from(containerRef.current, {
-        duration: 0.6,
-        opacity: 0,
+        duration: isMobile ? 0.3 : 0.6,
+        opacity: isMobile ? 1 : 0,
         ease: 'power3.out',
         delay: 0.1,
       })
 
-      // Animate format cards - removed opacity animation to fix visibility
+      // Animate format cards - no opacity on mobile
       gsap.from('.format-card', {
-        duration: 0.5,
-        y: 20,
-        stagger: 0.08,
+        duration: isMobile ? 0.3 : 0.5,
+        y: isMobile ? 0 : 20,
+        stagger: isMobile ? 0 : 0.08,
         ease: 'power2.out',
-        delay: 0.6,
+        delay: isMobile ? 0 : 0.6,
       })
     })
 

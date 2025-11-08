@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,6 +45,19 @@ type FormatCheckResponse struct {
 	SelectedFormat string   `json:"selectedFormat,omitempty"`
 }
 
+type ResolveRequest struct {
+	URL string `json:"url"`
+}
+
+type ResolveResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message,omitempty"`
+	OriginalURL  string `json:"originalUrl"`
+	ResolvedURL  string `json:"resolvedUrl"`
+	WasRedirect  bool   `json:"wasRedirect"`
+	WasCanonical bool   `json:"wasCanonical"`
+}
+
 var (
 	progressClients = make(map[string]chan ProgressUpdate)
 	progressMutex   sync.RWMutex
@@ -57,6 +72,7 @@ func main() {
 	http.HandleFunc("/progress", handleProgress)
 	http.HandleFunc("/download-file/", handleDownloadFile)
 	http.HandleFunc("/check-formats", handleCheckFormats)
+	http.HandleFunc("/resolve", handleResolve)
 
 	// Check if yt-dlp is installed
 	if err := checkYtDlp(); err != nil {
@@ -75,33 +91,276 @@ func checkYtDlp() error {
 	return cmd.Run()
 }
 
-// cleanURL entfernt Playlist-Parameter und andere unerwünschte URL-Teile
-func cleanURL(rawURL string) (string, error) {
-	parsedURL, err := url.Parse(rawURL)
+// isValidYouTubeURL validates that the URL is from YouTube (including all variants and mobile)
+func isValidYouTubeURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", err
+		return false
 	}
 
-	// Expand youtu.be short URLs to full youtube.com URLs
-	if parsedURL.Host == "youtu.be" {
-		videoID := strings.TrimPrefix(parsedURL.Path, "/")
-		// Reconstruct as full YouTube URL
-		parsedURL.Host = "www.youtube.com"
-		parsedURL.Path = "/watch"
-		query := parsedURL.Query()
-		query.Set("v", videoID)
-		parsedURL.RawQuery = query.Encode()
+	host := strings.ToLower(parsed.Host)
+
+	// Remove www. prefix for comparison
+	host = strings.TrimPrefix(host, "www.")
+
+	// List of valid YouTube domains
+	validHosts := []string{
+		"youtube.com",
+		"m.youtube.com",
+		"youtu.be",
+		"youtube-nocookie.com",
 	}
 
-	// Entferne list, index und andere Playlist-bezogene Parameter
-	query := parsedURL.Query()
-	query.Del("list")
-	query.Del("index")
-	query.Del("start_radio")
-	query.Del("si") // Remove YouTube tracking parameter
-	parsedURL.RawQuery = query.Encode()
+	// Check if host matches or is a subdomain of YouTube
+	for _, validHost := range validHosts {
+		if host == validHost || strings.HasSuffix(host, "."+validHost) {
+			return true
+		}
+	}
 
-	return parsedURL.String(), nil
+	return false
+}
+
+// resolveHTTP follows HTTP redirects manually (HEAD first, then GET fallback)
+// and returns the final URL after up to maxHops hops.
+func resolveHTTP(start string, maxHops int) (string, error) {
+	u := start
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		// do NOT auto-follow; we want to read Location ourselves
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	for i := 0; i < maxHops; i++ {
+		req, err := http.NewRequest(http.MethodHead, u, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("User-Agent", "yt-url-resolver/1.0 (+https://example.local)")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			// Some servers don't like HEAD; try GET
+			req.Method = http.MethodGet
+			resp, err = client.Do(req)
+			if err != nil {
+				return "", err
+			}
+		}
+		resp.Body.Close()
+
+		// 3xx → follow Location
+		if resp.StatusCode/100 == 3 {
+			loc := resp.Header.Get("Location")
+			if loc == "" {
+				return "", errors.New("redirect without Location header")
+			}
+			// Resolve relative locations
+			next, err := url.Parse(loc)
+			if err != nil {
+				return "", err
+			}
+			base, _ := url.Parse(u)
+			u = base.ResolveReference(next).String()
+			continue
+		}
+
+		// Non-redirect → done
+		return u, nil
+	}
+	return "", fmt.Errorf("too many redirects (>%d)", maxHops)
+}
+
+// canonicalYouTube normalizes many YouTube URL shapes into https://www.youtube.com/watch?v=ID
+// Keeps only v and optionally t (timestamp) query params.
+func canonicalYouTube(raw string) (string, bool) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+
+	host := strings.ToLower(parsed.Host)
+	// unify host
+	if host == "youtu.be" {
+		// Path is /VIDEO_ID
+		id := strings.TrimPrefix(parsed.Path, "/")
+		if id == "" {
+			return "", false
+		}
+		// keep optional t=… from short URL
+		t := parsed.Query().Get("t")
+		q := url.Values{}
+		q.Set("v", id)
+		if t != "" {
+			q.Set("t", t)
+		}
+		return (&url.URL{
+			Scheme:   "https",
+			Host:     "www.youtube.com",
+			Path:     "/watch",
+			RawQuery: q.Encode(),
+		}).String(), true
+	}
+
+	if strings.HasSuffix(host, "youtube.com") || strings.HasSuffix(host, "youtube-nocookie.com") || strings.HasSuffix(host, "m.youtube.com") {
+		// shorts/live → watch
+		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		if len(parts) >= 2 && (parts[0] == "shorts" || parts[0] == "live") {
+			id := parts[1]
+			if id != "" {
+				q := url.Values{}
+				q.Set("v", id)
+				t := parsed.Query().Get("t")
+				if t != "" {
+					q.Set("t", t)
+				}
+				return (&url.URL{
+					Scheme:   "https",
+					Host:     "www.youtube.com",
+					Path:     "/watch",
+					RawQuery: q.Encode(),
+				}).String(), true
+			}
+		}
+
+		// already a watch URL?
+		if strings.HasPrefix(parsed.Path, "/watch") {
+			q := parsed.Query()
+			id := q.Get("v")
+			if id == "" {
+				return "", false
+			}
+			// rebuild with only v and optional t
+			only := url.Values{}
+			only.Set("v", id)
+			if t := q.Get("t"); t != "" {
+				only.Set("t", t)
+			}
+			return (&url.URL{
+				Scheme:   "https",
+				Host:     "www.youtube.com",
+				Path:     "/watch",
+				RawQuery: only.Encode(),
+			}).String(), true
+		}
+
+		// youtu.be embed-like: /embed/ID
+		if strings.HasPrefix(parsed.Path, "/embed/") {
+			id := path.Base(parsed.Path)
+			if id != "" {
+				q := url.Values{}
+				q.Set("v", id)
+				if t := parsed.Query().Get("start"); t != "" {
+					// embed uses start=seconds; map to t
+					q.Set("t", t+"s")
+				}
+				return (&url.URL{
+					Scheme:   "https",
+					Host:     "www.youtube.com",
+					Path:     "/watch",
+					RawQuery: q.Encode(),
+				}).String(), true
+			}
+		}
+	}
+
+	return "", false
+}
+
+// resolveYouTubeURL combines canonicalization and HTTP redirect resolution
+func resolveYouTubeURL(input string) (string, bool, bool, error) {
+	// First: try canonicalize without network (works for youtu.be, shorts, etc.)
+	if canon, ok := canonicalYouTube(input); ok {
+		return canon, false, true, nil
+	}
+
+	// Otherwise: resolve HTTP redirects, then try canonicalize again.
+	final, err := resolveHTTP(input, 10)
+	if err != nil {
+		// if redirect resolving failed, still return what we have
+		return input, false, false, err
+	}
+
+	wasRedirect := final != input
+
+	if canon, ok := canonicalYouTube(final); ok {
+		return canon, wasRedirect, true, nil
+	}
+
+	// Fallback: return the final resolved URL
+	return final, wasRedirect, false, nil
+}
+
+func handleResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ResolveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ResolveResponse{
+			Success: false,
+			Message: "Ungültige Anfrage",
+		})
+		return
+	}
+
+	if req.URL == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ResolveResponse{
+			Success: false,
+			Message: "URL fehlt",
+		})
+		return
+	}
+
+	// Validate that URL is from YouTube
+	if !isValidYouTubeURL(req.URL) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ResolveResponse{
+			Success: false,
+			Message: "Nur YouTube URLs sind erlaubt",
+		})
+		return
+	}
+
+	resolvedURL, wasRedirect, wasCanonical, err := resolveYouTubeURL(req.URL)
+
+	response := ResolveResponse{
+		Success:      true,
+		OriginalURL:  req.URL,
+		ResolvedURL:  resolvedURL,
+		WasRedirect:  wasRedirect,
+		WasCanonical: wasCanonical,
+	}
+
+	if err != nil {
+		response.Message = fmt.Sprintf("Warnung: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// cleanURL entfernt Playlist-Parameter und andere unerwünschte URL-Teile
+// Now uses the advanced resolver functionality
+func cleanURL(rawURL string) (string, error) {
+	// Use the resolver to canonicalize and clean the URL
+	resolvedURL, _, _, err := resolveYouTubeURL(rawURL)
+	if err != nil {
+		// If resolution fails, fall back to basic parsing
+		parsedURL, parseErr := url.Parse(rawURL)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		return parsedURL.String(), nil
+	}
+
+	return resolvedURL, nil
 }
 
 func handleProgress(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +421,15 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, DownloadResponse{
 			Success: false,
 			Message: "Bitte gib eine YouTube-URL ein.",
+		})
+		return
+	}
+
+	// Validate that URL is from YouTube
+	if !isValidYouTubeURL(req.URL) {
+		sendJSONResponse(w, DownloadResponse{
+			Success: false,
+			Message: "Nur YouTube URLs sind erlaubt. Bitte verwende einen gültigen YouTube-Link.",
 		})
 		return
 	}
@@ -454,8 +722,24 @@ func handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	// Security: Prevent directory traversal
 	filename = filepath.Base(filename)
 
+	// Additional security: reject suspicious filenames
+	if strings.Contains(filename, "..") || strings.ContainsAny(filename, "/\\") {
+		log.Printf("Security: Rejected suspicious filename: %s", filename)
+		http.Error(w, "Ungültiger Dateiname", http.StatusBadRequest)
+		return
+	}
+
 	// Build full path
 	filePath := filepath.Join("./downloads", filename)
+
+	// Security: Verify the resolved path is still within downloads directory
+	absDownloads, _ := filepath.Abs("./downloads")
+	absFilePath, _ := filepath.Abs(filePath)
+	if !strings.HasPrefix(absFilePath, absDownloads) {
+		log.Printf("Security: Path traversal attempt detected: %s", filename)
+		http.Error(w, "Zugriff verweigert", http.StatusForbidden)
+		return
+	}
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -515,6 +799,16 @@ func handleCheckFormats(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(FormatCheckResponse{
 			Success: false,
 			Message: "Ungültige Anfrage",
+		})
+		return
+	}
+
+	// Validate that URL is from YouTube
+	if !isValidYouTubeURL(req.URL) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(FormatCheckResponse{
+			Success: false,
+			Message: "Nur YouTube URLs sind erlaubt",
 		})
 		return
 	}

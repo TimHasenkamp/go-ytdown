@@ -18,11 +18,35 @@ function App() {
   const [showPlaylistWarning, setShowPlaylistWarning] = useState(false)
   const [toasts, setToasts] = useState([])
   const [isCheckingUrl, setIsCheckingUrl] = useState(false)
+  const [urlResolved, setUrlResolved] = useState(false)
 
   const eventSourceRef = useRef(null)
   const containerRef = useRef(null)
   const titleRef = useRef(null)
   const debounceTimerRef = useRef(null)
+  const resolveTimerRef = useRef(null)
+
+  // Validate if URL is from YouTube
+  const isValidYouTubeURL = (url) => {
+    if (!url) return false
+    try {
+      const urlObj = new URL(url)
+      const host = urlObj.hostname.toLowerCase().replace(/^www\./, '')
+
+      const validHosts = [
+        'youtube.com',
+        'm.youtube.com',
+        'youtu.be',
+        'youtube-nocookie.com'
+      ]
+
+      return validHosts.some(validHost =>
+        host === validHost || host.endsWith('.' + validHost)
+      )
+    } catch {
+      return false
+    }
+  }
 
   // GSAP Animations on Mount
   useEffect(() => {
@@ -83,8 +107,59 @@ function App() {
       if (eventSourceRef.current) {
         eventSourceRef.current.close()
       }
+      if (resolveTimerRef.current) {
+        clearTimeout(resolveTimerRef.current)
+      }
     }
   }, [])
+
+  // URL Resolver - automatically resolve short links and canonicalize URLs
+  useEffect(() => {
+    if (resolveTimerRef.current) {
+      clearTimeout(resolveTimerRef.current)
+    }
+
+    // Only resolve if URL looks like a YouTube URL
+    if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+      resolveTimerRef.current = setTimeout(async () => {
+        try {
+          const response = await fetch('/resolve', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url }),
+          })
+
+          const data = await response.json()
+
+          if (data.success && data.resolvedUrl !== url) {
+            // URL was resolved/changed - update it
+            setUrl(data.resolvedUrl)
+            setUrlResolved(true)
+
+            // Show appropriate toast message
+            if (data.wasRedirect) {
+              addToast('success', '✓ Short-Link wurde aufgelöst')
+            } else if (data.wasCanonical) {
+              addToast('success', '✓ URL wurde in Standard-Format konvertiert')
+            }
+
+            // Reset resolved flag after 3 seconds
+            setTimeout(() => setUrlResolved(false), 3000)
+          }
+        } catch (error) {
+          console.error('URL resolution error:', error)
+        }
+      }, 300) // 300ms debounce for paste events
+    }
+
+    return () => {
+      if (resolveTimerRef.current) {
+        clearTimeout(resolveTimerRef.current)
+      }
+    }
+  }, [url])
 
   // Auto URL check with debounce
   useEffect(() => {
@@ -155,6 +230,13 @@ function App() {
 
     if (!url.trim()) {
       setMessage({ type: 'error', text: 'Bitte eine YouTube URL eingeben' })
+      return
+    }
+
+    // Validate that URL is from YouTube
+    if (!isValidYouTubeURL(url)) {
+      addToast('error', 'Nur YouTube URLs sind erlaubt')
+      setMessage({ type: 'error', text: 'Bitte verwende einen gültigen YouTube-Link (youtube.com, youtu.be)' })
       return
     }
 
@@ -265,12 +347,23 @@ function App() {
                   id="url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=..."
+                  placeholder="https://www.youtube.com/watch?v=... oder youtu.be/..."
                   disabled={isDownloading}
                   required
-                  className="animated-input"
+                  className={`animated-input ${urlResolved ? 'url-resolved' : ''}`}
                 />
                 <div className="input-glow" />
+                {urlResolved && (
+                  <motion.div
+                    className="url-check-icon"
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 180 }}
+                    transition={{ type: 'spring', damping: 15 }}
+                  >
+                    <CheckCircle size={20} />
+                  </motion.div>
+                )}
               </div>
 
               <AnimatePresence>
@@ -319,16 +412,39 @@ function App() {
             </div>
 
             <StarBorder>
-              <button
+              <motion.button
                 type="submit"
                 className="submit-button"
-                disabled={isDownloading}
+                disabled={isDownloading || isCheckingUrl}
+                animate={isCheckingUrl ? {
+                  scale: [1, 1.02, 1],
+                  boxShadow: [
+                    '0 0 0 0px rgba(139, 92, 246, 0)',
+                    '0 0 0 8px rgba(139, 92, 246, 0.3)',
+                    '0 0 0 0px rgba(139, 92, 246, 0)'
+                  ]
+                } : {}}
+                transition={{
+                  duration: 1.5,
+                  repeat: isCheckingUrl ? Infinity : 0,
+                  ease: "easeInOut"
+                }}
               >
                 <span className="button-text" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                   {isDownloading ? (
                     <>
                       <Loader2 size={20} className="animate-spin" />
                       Läuft...
+                    </>
+                  ) : isCheckingUrl ? (
+                    <>
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                      >
+                        <Loader2 size={20} />
+                      </motion.div>
+                      Warte auf Prüfung...
                     </>
                   ) : (
                     <>
@@ -337,7 +453,7 @@ function App() {
                     </>
                   )}
                 </span>
-              </button>
+              </motion.button>
             </StarBorder>
           </form>
 

@@ -59,9 +59,49 @@ type ResolveResponse struct {
 	WasCanonical bool   `json:"wasCanonical"`
 }
 
+type ErrorReport struct {
+	ErrorMessage string            `json:"errorMessage"`
+	ErrorStack   string            `json:"errorStack"`
+	URL          string            `json:"url"`
+	UserAgent    string            `json:"userAgent"`
+	Timestamp    string            `json:"timestamp"`
+	SessionID    string            `json:"sessionId"`
+	LastActions  []string          `json:"lastActions"`
+	BrowserInfo  map[string]string `json:"browserInfo"`
+}
+
+type SlackMessage struct {
+	Text        string              `json:"text,omitempty"`
+	Blocks      []SlackBlock        `json:"blocks,omitempty"`
+	Attachments []SlackAttachment   `json:"attachments,omitempty"`
+}
+
+type SlackBlock struct {
+	Type string                 `json:"type"`
+	Text *SlackText             `json:"text,omitempty"`
+	Fields []SlackText          `json:"fields,omitempty"`
+}
+
+type SlackText struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type SlackAttachment struct {
+	Color  string       `json:"color"`
+	Fields []SlackField `json:"fields"`
+}
+
+type SlackField struct {
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
+}
+
 var (
 	progressClients = make(map[string]chan ProgressUpdate)
 	progressMutex   sync.RWMutex
+	slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL") // Set via environment variable
 )
 
 func main() {
@@ -74,6 +114,7 @@ func main() {
 	http.HandleFunc("/download-file/", handleDownloadFile)
 	http.HandleFunc("/check-formats", handleCheckFormats)
 	http.HandleFunc("/resolve", handleResolve)
+	http.HandleFunc("/report-error", handleErrorReport)
 
 	// Check if yt-dlp is installed
 	if err := checkYtDlp(); err != nil {
@@ -971,4 +1012,151 @@ func handleCheckFormats(w http.ResponseWriter, r *http.Request) {
 func sendJSONResponse(w http.ResponseWriter, response DownloadResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// sendSlackNotification sends a formatted error report to Slack
+func sendSlackNotification(report ErrorReport) error {
+	if slackWebhookURL == "" {
+		log.Printf("[Slack] Warning: SLACK_WEBHOOK_URL not configured, skipping notification")
+		return nil
+	}
+
+	// Build Slack message with rich formatting
+	message := SlackMessage{
+		Text: "🚨 YouTube Downloader Error Report",
+		Attachments: []SlackAttachment{
+			{
+				Color: "danger",
+				Fields: []SlackField{
+					{
+						Title: "Error Message",
+						Value: report.ErrorMessage,
+						Short: false,
+					},
+					{
+						Title: "URL",
+						Value: report.URL,
+						Short: true,
+					},
+					{
+						Title: "Timestamp",
+						Value: report.Timestamp,
+						Short: true,
+					},
+					{
+						Title: "User Agent",
+						Value: report.UserAgent,
+						Short: false,
+					},
+					{
+						Title: "Session ID",
+						Value: report.SessionID,
+						Short: true,
+					},
+					{
+						Title: "Browser",
+						Value: fmt.Sprintf("%s %s on %s",
+							report.BrowserInfo["name"],
+							report.BrowserInfo["version"],
+							report.BrowserInfo["os"]),
+						Short: true,
+					},
+				},
+			},
+		},
+	}
+
+	// Add stack trace if available
+	if report.ErrorStack != "" {
+		message.Attachments[0].Fields = append(message.Attachments[0].Fields, SlackField{
+			Title: "Stack Trace",
+			Value: fmt.Sprintf("```%s```", truncateString(report.ErrorStack, 500)),
+			Short: false,
+		})
+	}
+
+	// Add last actions if available
+	if len(report.LastActions) > 0 {
+		actionsText := ""
+		for i, action := range report.LastActions {
+			actionsText += fmt.Sprintf("%d. %s\n", i+1, action)
+		}
+		message.Attachments[0].Fields = append(message.Attachments[0].Fields, SlackField{
+			Title: "Last Actions",
+			Value: actionsText,
+			Short: false,
+		})
+	}
+
+	// Send to Slack
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Slack message: %v", err)
+	}
+
+	resp, err := http.Post(slackWebhookURL, "application/json", strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("failed to send Slack notification: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("slack returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("[Slack] Error report sent successfully for session %s", report.SessionID)
+	return nil
+}
+
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// handleErrorReport handles error reports from the frontend
+func handleErrorReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var report ErrorReport
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		log.Printf("[ErrorReport] Failed to decode error report: %v", err)
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Add server timestamp
+	if report.Timestamp == "" {
+		report.Timestamp = time.Now().Format(time.RFC3339)
+	}
+
+	// Log error locally
+	log.Printf("[ErrorReport] Error received from frontend:")
+	log.Printf("[ErrorReport]   Message: %s", report.ErrorMessage)
+	log.Printf("[ErrorReport]   URL: %s", report.URL)
+	log.Printf("[ErrorReport]   User-Agent: %s", report.UserAgent)
+	log.Printf("[ErrorReport]   Session: %s", report.SessionID)
+	if len(report.LastActions) > 0 {
+		log.Printf("[ErrorReport]   Last Actions: %v", report.LastActions)
+	}
+	if report.ErrorStack != "" {
+		log.Printf("[ErrorReport]   Stack: %s", report.ErrorStack)
+	}
+
+	// Send to Slack
+	go func() {
+		if err := sendSlackNotification(report); err != nil {
+			log.Printf("[ErrorReport] Failed to send Slack notification: %v", err)
+		}
+	}()
+
+	// Respond to frontend
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

@@ -25,6 +25,77 @@ function App() {
   const titleRef = useRef(null)
   const debounceTimerRef = useRef(null)
   const resolveTimerRef = useRef(null)
+  const lastActionsRef = useRef([])
+  const sessionIdRef = useRef(Math.random().toString(36).substring(7))
+
+  // Track user actions for error reporting
+  const trackAction = (action) => {
+    const timestamp = new Date().toISOString()
+    lastActionsRef.current = [
+      ...lastActionsRef.current.slice(-9), // Keep last 9 actions
+      `[${timestamp}] ${action}`
+    ]
+  }
+
+  // Send error report to backend
+  const reportError = async (error, context = {}) => {
+    try {
+      const errorReport = {
+        errorMessage: error.message || String(error),
+        errorStack: error.stack || '',
+        url: window.location.href,
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toISOString(),
+        sessionId: sessionIdRef.current,
+        lastActions: lastActionsRef.current,
+        browserInfo: {
+          name: navigator.userAgentData?.brands?.[0]?.brand || 'Unknown',
+          version: navigator.userAgentData?.brands?.[0]?.version || 'Unknown',
+          os: navigator.userAgentData?.platform || navigator.platform || 'Unknown',
+          language: navigator.language,
+          screenResolution: `${window.screen.width}x${window.screen.height}`,
+          viewport: `${window.innerWidth}x${window.innerHeight}`,
+          ...context
+        }
+      }
+
+      console.error('[ErrorReport] Sending error report:', errorReport)
+
+      await fetch('/report-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(errorReport)
+      })
+    } catch (err) {
+      console.error('[ErrorReport] Failed to send error report:', err)
+    }
+  }
+
+  // Global error handler
+  useEffect(() => {
+    const handleError = (event) => {
+      reportError(event.error || new Error(event.message), {
+        type: 'uncaught_error',
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno
+      })
+    }
+
+    const handleUnhandledRejection = (event) => {
+      reportError(event.reason || new Error('Unhandled Promise Rejection'), {
+        type: 'unhandled_rejection'
+      })
+    }
+
+    window.addEventListener('error', handleError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+
+    return () => {
+      window.removeEventListener('error', handleError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [])
 
   // Validate if URL is from YouTube
   const isValidYouTubeURL = (url) => {
@@ -227,9 +298,11 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    trackAction(`Download initiated: format=${format}, url=${url.substring(0, 50)}...`)
 
     if (!url.trim()) {
       setMessage({ type: 'error', text: 'Bitte eine YouTube URL eingeben' })
+      trackAction('Download failed: Empty URL')
       return
     }
 
@@ -237,6 +310,7 @@ function App() {
     if (!isValidYouTubeURL(url)) {
       addToast('error', 'Nur YouTube URLs sind erlaubt')
       setMessage({ type: 'error', text: 'Bitte verwende einen gültigen YouTube-Link (youtube.com, youtu.be)' })
+      trackAction('Download failed: Invalid YouTube URL')
       return
     }
 
@@ -258,12 +332,14 @@ function App() {
 
       if (data.success) {
         const sessionID = data.message
+        trackAction(`SSE connection started: session=${sessionID}`)
 
         console.log('[SSE] Opening EventSource for session:', sessionID)
         eventSourceRef.current = new EventSource(`/progress?session=${sessionID}`)
 
         eventSourceRef.current.onopen = () => {
           console.log('[SSE] Connection opened successfully')
+          trackAction('SSE connection opened')
         }
 
         eventSourceRef.current.onmessage = (event) => {
@@ -275,6 +351,7 @@ function App() {
           if (update.progress === 100) {
             eventSourceRef.current.close()
             console.log('[SSE] Connection closed (100% reached)')
+            trackAction(`Download completed: ${update.status}`)
 
             const filename = update.status.replace('Completed: ', '')
             console.log('[Download] Attempting download for:', filename)
@@ -289,6 +366,7 @@ function App() {
 
             setIsDownloading(false)
             setMessage({ type: 'success', text: 'Download abgeschlossen!' })
+            trackAction('File download triggered')
 
             setTimeout(() => {
               setProgress(0)
@@ -300,6 +378,12 @@ function App() {
         eventSourceRef.current.onerror = (error) => {
           console.error('[SSE] Error occurred:', error)
           console.error('[SSE] ReadyState:', eventSourceRef.current?.readyState)
+          trackAction(`SSE error: readyState=${eventSourceRef.current?.readyState}`)
+          reportError(new Error('SSE Connection Error'), {
+            type: 'sse_error',
+            readyState: eventSourceRef.current?.readyState,
+            sessionID
+          })
           eventSourceRef.current.close()
           setIsDownloading(false)
           setMessage({ type: 'error', text: 'Verbindungsfehler beim Fortschritt' })
@@ -307,10 +391,14 @@ function App() {
       } else {
         setIsDownloading(false)
         setMessage({ type: 'error', text: `Fehler: ${data.message}` })
+        trackAction(`Download failed: ${data.message}`)
+        reportError(new Error(data.message), { type: 'download_error', response: data })
       }
     } catch (error) {
       setIsDownloading(false)
       setMessage({ type: 'error', text: `Fehler: ${error.message}` })
+      trackAction(`Download exception: ${error.message}`)
+      reportError(error, { type: 'download_exception' })
     }
   }
 
@@ -323,6 +411,7 @@ function App() {
 
   const handleFormatClick = (fmt) => {
     if (isDownloading) return
+    trackAction(`Format changed: ${format} → ${fmt.value}`)
     setFormat(fmt.value)
   }
 

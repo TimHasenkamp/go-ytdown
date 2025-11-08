@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6366f1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="48" fill="url(#grad)"/>
+
+  <!-- ArrowDownToLine Icon (Lucide style) -->
+  <g transform="translate(50, 50)">
+    <!-- Arrow shaft -->
+    <line x1="0" y1="-20" x2="0" y2="15" stroke="white" stroke-width="5" stroke-linecap="round"/>
+
+    <!-- Arrow head (left) -->
+    <line x1="0" y1="15" x2="-10" y2="5" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Arrow head (right) -->
+    <line x1="0" y1="15" x2="10" y2="5" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Bottom line -->
+    <line x1="-15" y1="23" x2="15" y2="23" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>

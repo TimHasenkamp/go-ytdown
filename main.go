@@ -34,6 +34,7 @@ type DownloadResponse struct {
 type ProgressUpdate struct {
 	Progress int    `json:"progress"`
 	Status   string `json:"status"`
+	Error    bool   `json:"error,omitempty"` // Indicates if this is an error message
 }
 
 type FormatCheckResponse struct {
@@ -561,7 +562,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		filename, err := downloadVideo(cleanedURL, req.Format, sessionID)
 		if err != nil {
 			log.Printf("Download error: %v", err)
-			sendProgress(sessionID, 0, fmt.Sprintf("Error: %v", err))
+			sendError(sessionID, fmt.Sprintf("%v", err))
 		} else {
 			sendProgress(sessionID, 100, fmt.Sprintf("Completed: %s", filename))
 		}
@@ -582,10 +583,28 @@ func sendProgress(sessionID string, progress int, status string) {
 
 	if ch, ok := progressClients[sessionID]; ok {
 		select {
-		case ch <- ProgressUpdate{Progress: progress, Status: status}:
+		case ch <- ProgressUpdate{Progress: progress, Status: status, Error: false}:
 		default:
 			// Client disconnected or channel full
 		}
+	}
+}
+
+func sendError(sessionID string, errorMsg string) {
+	log.Printf("Error [%s]: %s", sessionID, errorMsg)
+
+	progressMutex.RLock()
+	defer progressMutex.RUnlock()
+
+	if ch, ok := progressClients[sessionID]; ok {
+		// Send error with progress -1 to signal error state
+		select {
+		case ch <- ProgressUpdate{Progress: -1, Status: errorMsg, Error: true}:
+		default:
+			// Client disconnected or channel full
+		}
+		// Close the channel after sending error
+		close(ch)
 	}
 }
 

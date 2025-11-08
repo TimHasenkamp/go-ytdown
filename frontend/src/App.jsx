@@ -358,6 +358,26 @@ function App() {
         eventSourceRef.current.onmessage = (event) => {
           console.log('[SSE] Message received:', event.data)
           const update = JSON.parse(event.data)
+
+          // Check if this is an error
+          if (update.error === true || update.progress === -1) {
+            eventSourceRef.current.close()
+            console.log('[SSE] Error received from backend:', update.status)
+            trackAction(`Download failed: ${update.status}`)
+
+            setIsDownloading(false)
+            setProgress(0)
+            setProgressText('')
+            setMessage({ type: 'error', text: update.status })
+            addToast('error', update.status)
+
+            reportError(new Error(update.status), {
+              type: 'backend_error',
+              sessionID
+            })
+            return
+          }
+
           setProgress(update.progress)
           setProgressText(update.status)
 

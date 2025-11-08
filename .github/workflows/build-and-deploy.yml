@@ -1,7 +1,7 @@
 name: build-and-deploy
 on:
   push:
-    branches: ["main", "1-fix-deployment-pipeline"]
+    branches: ["main", "3-ytresolver-einbauen"]
 
 env:
   IMAGE: ghcr.io/timhasenkamp/go-ytdown

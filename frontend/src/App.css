@@ -665,11 +665,11 @@ label {
   }
 
   .toast-success {
-    background: rgba(34, 197, 94, 0.2);
+    background: rgba(34, 197, 94, 1);
   }
 
   .toast-error {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 1);
   }
 }
 

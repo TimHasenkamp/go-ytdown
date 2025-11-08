@@ -99,10 +99,17 @@ type SlackField struct {
 	Short bool   `json:"short"`
 }
 
+type CompletedDownload struct {
+	FinalUpdate ProgressUpdate
+	CompletedAt time.Time
+}
+
 var (
-	progressClients = make(map[string]chan ProgressUpdate)
-	progressMutex   sync.RWMutex
-	slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL") // Set via environment variable
+	progressClients      = make(map[string][]chan ProgressUpdate) // Multiple clients per session
+	completedDownloads   = make(map[string]*CompletedDownload)    // Cache completed downloads for reconnect
+	progressMutex        sync.RWMutex
+	slackWebhookURL      = os.Getenv("SLACK_WEBHOOK_URL") // Set via environment variable
+	completedCacheTTL    = 5 * time.Minute                 // Keep completed downloads for 5 minutes
 )
 
 func main() {
@@ -125,6 +132,9 @@ func main() {
 
 	// Send startup notification to Slack
 	go sendStartupNotification()
+
+	// Start cleanup goroutine for old completed downloads
+	go cleanupCompletedDownloads()
 
 	port := "8080"
 	log.Printf("Server starting on http://localhost:%s", port)
@@ -456,23 +466,50 @@ func handleProgress(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
 
-	// Create channel for this client
+	// Check if this download was already completed
+	progressMutex.RLock()
+	completed, wasCompleted := completedDownloads[sessionID]
+	progressMutex.RUnlock()
+
+	if wasCompleted {
+		// Send the final update immediately and close
+		log.Printf("[SSE] Reconnect to completed session %s, sending final update", sessionID)
+		data, _ := json.Marshal(completed.FinalUpdate)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
+
+	// Create a new channel for this client
 	progressChan := make(chan ProgressUpdate, 10)
 
 	progressMutex.Lock()
-	progressClients[sessionID] = progressChan
+	progressClients[sessionID] = append(progressClients[sessionID], progressChan)
+	clientCount := len(progressClients[sessionID])
 	progressMutex.Unlock()
-	log.Printf("[SSE] Progress channel registered for session: %s", sessionID)
 
-	// Clean up on disconnect (only if channel still exists)
+	log.Printf("[SSE] Client connected for session %s (total clients: %d)", sessionID, clientCount)
+
+	// Clean up on disconnect - remove this channel from the list
 	defer func() {
 		progressMutex.Lock()
-		if ch, exists := progressClients[sessionID]; exists {
-			delete(progressClients, sessionID)
-			close(ch)
-			log.Printf("[SSE] Client disconnected, cleaned up session: %s", sessionID)
-		} else {
-			log.Printf("[SSE] Client disconnected, session already cleaned: %s", sessionID)
+		clients := progressClients[sessionID]
+		for i, ch := range clients {
+			if ch == progressChan {
+				// Remove this channel from the slice
+				progressClients[sessionID] = append(clients[:i], clients[i+1:]...)
+				close(ch)
+				log.Printf("[SSE] Client disconnected from session %s (remaining: %d)", sessionID, len(progressClients[sessionID]))
+
+				// If no more clients, remove session entirely
+				if len(progressClients[sessionID]) == 0 {
+					delete(progressClients, sessionID)
+					log.Printf("[SSE] All clients disconnected, removed session: %s", sessionID)
+				}
+				break
+			}
 		}
 		progressMutex.Unlock()
 	}()
@@ -582,46 +619,72 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 func sendProgress(sessionID string, progress int, status string) {
 	log.Printf("Progress [%s]: %d%% - %s", sessionID, progress, status)
 
+	update := ProgressUpdate{Progress: progress, Status: status, Error: false}
+
 	progressMutex.RLock()
-	ch, ok := progressClients[sessionID]
+	clients := progressClients[sessionID]
 	progressMutex.RUnlock()
 
-	if ok {
+	// Send to all connected clients for this session
+	for _, ch := range clients {
 		select {
-		case ch <- ProgressUpdate{Progress: progress, Status: status, Error: false}:
-			// If 100%, close the channel after sending final update
-			if progress == 100 {
-				progressMutex.Lock()
-				delete(progressClients, sessionID)
-				close(ch)
-				progressMutex.Unlock()
-			}
+		case ch <- update:
 		default:
-			// Client disconnected or channel full - already cleaned up
+			// Channel full or closed, skip
 		}
+	}
+
+	// If 100%, close all channels and cache the final update
+	if progress == 100 {
+		progressMutex.Lock()
+		for _, ch := range progressClients[sessionID] {
+			close(ch)
+		}
+		delete(progressClients, sessionID)
+
+		// Cache the final update for reconnects
+		completedDownloads[sessionID] = &CompletedDownload{
+			FinalUpdate: update,
+			CompletedAt: time.Now(),
+		}
+
+		progressMutex.Unlock()
+		log.Printf("[SSE] Closed all channels for completed session: %s", sessionID)
 	}
 }
 
 func sendError(sessionID string, errorMsg string) {
 	log.Printf("Error [%s]: %s", sessionID, errorMsg)
 
-	progressMutex.RLock()
-	ch, ok := progressClients[sessionID]
-	progressMutex.RUnlock()
+	update := ProgressUpdate{Progress: -1, Status: errorMsg, Error: true}
 
-	if ok {
-		// Send error with progress -1 to signal error state
+	progressMutex.Lock()
+	clients := progressClients[sessionID]
+
+	// Send error to all connected clients
+	for _, ch := range clients {
 		select {
-		case ch <- ProgressUpdate{Progress: -1, Status: errorMsg, Error: true}:
-			// Close the channel after sending error to stop SSE stream
-			progressMutex.Lock()
-			delete(progressClients, sessionID)
-			close(ch)
-			progressMutex.Unlock()
+		case ch <- update:
 		default:
-			// Client disconnected or channel full - already cleaned up
+			// Channel full or closed, skip
 		}
 	}
+
+	// Close all channels and cache the error for reconnects
+	for _, ch := range clients {
+		close(ch)
+	}
+	delete(progressClients, sessionID)
+
+	// Cache the error update for reconnects
+	completedDownloads[sessionID] = &CompletedDownload{
+		FinalUpdate: update,
+		CompletedAt: time.Now(),
+	}
+
+	progressMutex.Unlock()
+
+	log.Printf("[SSE] Closed all channels for errored session: %s", sessionID)
 }
 
 func downloadVideo(url, format, sessionID string) (string, error) {
@@ -1353,4 +1416,22 @@ func handleTestSlack(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Test notification sent to Slack! Check your channel.",
 	})
+}
+
+// cleanupCompletedDownloads runs periodically to remove old completed downloads from cache
+func cleanupCompletedDownloads() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		progressMutex.Lock()
+		now := time.Now()
+		for sessionID, completed := range completedDownloads {
+			if now.Sub(completed.CompletedAt) > completedCacheTTL {
+				delete(completedDownloads, sessionID)
+				log.Printf("[Cleanup] Removed old completed download: %s", sessionID)
+			}
+		}
+		progressMutex.Unlock()
+	}
 }

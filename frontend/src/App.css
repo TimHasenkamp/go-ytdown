@@ -675,6 +675,14 @@ label {
   .toast-error {
     background: rgba(239, 68, 68, 1);
   }
+
+  .toast-warning {
+    background: rgba(245, 158, 11, 1);
+  }
+
+  .toast-info {
+    background: rgba(59, 130, 246, 1);
+  }
 }
 
 @media (max-width: 480px) {

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,6 +90,35 @@ func main() {
 func checkYtDlp() error {
 	cmd := exec.Command("yt-dlp", "--version")
 	return cmd.Run()
+}
+
+// removeEmojis removes all emoji characters from a string
+func removeEmojis(s string) string {
+	// Regex to match emoji characters
+	emojiPattern := regexp.MustCompile(`[\x{1F600}-\x{1F64F}]|[\x{1F300}-\x{1F5FF}]|[\x{1F680}-\x{1F6FF}]|[\x{1F700}-\x{1F77F}]|[\x{1F780}-\x{1F7FF}]|[\x{1F800}-\x{1F8FF}]|[\x{1F900}-\x{1F9FF}]|[\x{1FA00}-\x{1FA6F}]|[\x{1FA70}-\x{1FAFF}]|[\x{2600}-\x{26FF}]|[\x{2700}-\x{27BF}]`)
+	return emojiPattern.ReplaceAllString(s, "")
+}
+
+// sanitizeFilename removes emojis and problematic characters from filename
+func sanitizeFilename(filename string) string {
+	// Remove emojis
+	filename = removeEmojis(filename)
+
+	// Replace problematic characters with underscores
+	problematicChars := regexp.MustCompile(`[<>:"|?*｜]`)
+	filename = problematicChars.ReplaceAllString(filename, "_")
+
+	// Trim whitespace and dots
+	filename = strings.TrimSpace(filename)
+	filename = strings.Trim(filename, ".")
+
+	// Collapse multiple spaces/underscores
+	multiSpace := regexp.MustCompile(`\s+`)
+	filename = multiSpace.ReplaceAllString(filename, " ")
+	multiUnderscore := regexp.MustCompile(`_+`)
+	filename = multiUnderscore.ReplaceAllString(filename, "_")
+
+	return filename
 }
 
 // isValidYouTubeURL validates that the URL is from YouTube (including all variants and mobile)
@@ -366,15 +396,19 @@ func cleanURL(rawURL string) (string, error) {
 func handleProgress(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session")
 	if sessionID == "" {
+		log.Printf("[SSE] ERROR: No session ID provided")
 		http.Error(w, "Session ID required", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("[SSE] Client connected for session: %s", sessionID)
 
 	// Server-Sent Events Headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
 
 	// Create channel for this client
 	progressChan := make(chan ProgressUpdate, 10)
@@ -382,6 +416,7 @@ func handleProgress(w http.ResponseWriter, r *http.Request) {
 	progressMutex.Lock()
 	progressClients[sessionID] = progressChan
 	progressMutex.Unlock()
+	log.Printf("[SSE] Progress channel registered for session: %s", sessionID)
 
 	// Clean up on disconnect
 	defer func() {
@@ -389,16 +424,21 @@ func handleProgress(w http.ResponseWriter, r *http.Request) {
 		delete(progressClients, sessionID)
 		close(progressChan)
 		progressMutex.Unlock()
+		log.Printf("[SSE] Client disconnected for session: %s", sessionID)
 	}()
 
 	// Send updates to client
+	updateCount := 0
 	for update := range progressChan {
+		updateCount++
 		data, _ := json.Marshal(update)
+		log.Printf("[SSE] Sending update #%d to session %s: %d%% - %s", updateCount, sessionID, update.Progress, update.Status)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
 	}
+	log.Printf("[SSE] Finished sending %d updates for session: %s", updateCount, sessionID)
 }
 
 func handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -706,47 +746,87 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 		return "", fmt.Errorf("Download abgeschlossen, aber Datei wurde nicht gefunden")
 	}
 
+	originalPath := files[0]
+	originalFilename := filepath.Base(originalPath)
+
+	// Sanitize filename to remove emojis and problematic characters
+	sanitizedFilename := sanitizeFilename(originalFilename)
+
+	// If filename changed, rename the file
+	if sanitizedFilename != originalFilename {
+		newPath := filepath.Join(downloadsDir, sanitizedFilename)
+		if err := os.Rename(originalPath, newPath); err != nil {
+			log.Printf("Warning: Could not rename file from %s to %s: %v", originalFilename, sanitizedFilename, err)
+			// Continue with original filename if rename fails
+			return originalFilename, nil
+		}
+		log.Printf("File renamed from %s to %s (emojis removed)", originalFilename, sanitizedFilename)
+		return sanitizedFilename, nil
+	}
+
 	// Return just the filename (not the full path)
-	return filepath.Base(files[0]), nil
+	return originalFilename, nil
 }
 
 func handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	// Extract filename from URL path
 	filename := strings.TrimPrefix(r.URL.Path, "/download-file/")
+	log.Printf("[Download] Request received for file: %s (raw path: %s)", filename, r.URL.Path)
+
 	if filename == "" {
-		log.Printf("Download file error: No filename provided")
+		log.Printf("[Download] ERROR: No filename provided")
 		http.Error(w, "Dateiname fehlt", http.StatusBadRequest)
 		return
 	}
 
+	// URL decode the filename
+	decodedFilename, err := url.QueryUnescape(filename)
+	if err != nil {
+		log.Printf("[Download] ERROR: Failed to decode filename: %v", err)
+		http.Error(w, "Ungültiger Dateiname", http.StatusBadRequest)
+		return
+	}
+	filename = decodedFilename
+	log.Printf("[Download] Decoded filename: %s", filename)
+
 	// Security: Prevent directory traversal
 	filename = filepath.Base(filename)
+	log.Printf("[Download] After Base(): %s", filename)
 
 	// Additional security: reject suspicious filenames
 	if strings.Contains(filename, "..") || strings.ContainsAny(filename, "/\\") {
-		log.Printf("Security: Rejected suspicious filename: %s", filename)
+		log.Printf("[Download] SECURITY: Rejected suspicious filename: %s", filename)
 		http.Error(w, "Ungültiger Dateiname", http.StatusBadRequest)
 		return
 	}
 
 	// Build full path
 	filePath := filepath.Join("./downloads", filename)
+	log.Printf("[Download] Full path: %s", filePath)
 
 	// Security: Verify the resolved path is still within downloads directory
 	absDownloads, _ := filepath.Abs("./downloads")
 	absFilePath, _ := filepath.Abs(filePath)
 	if !strings.HasPrefix(absFilePath, absDownloads) {
-		log.Printf("Security: Path traversal attempt detected: %s", filename)
+		log.Printf("[Download] SECURITY: Path traversal attempt detected: %s", filename)
 		http.Error(w, "Zugriff verweigert", http.StatusForbidden)
 		return
 	}
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		log.Printf("Download file error: File not found: %s", filename)
+		log.Printf("[Download] ERROR: File not found: %s", filePath)
+		// List available files for debugging
+		files, _ := filepath.Glob("./downloads/*")
+		log.Printf("[Download] Available files in downloads:")
+		for _, f := range files {
+			log.Printf("[Download]   - %s", filepath.Base(f))
+		}
 		http.Error(w, "Datei nicht gefunden. Möglicherweise wurde sie bereits heruntergeladen.", http.StatusNotFound)
 		return
 	}
+
+	log.Printf("[Download] File found, preparing to send: %s", filename)
 
 	// Open file
 	file, err := os.Open(filePath)

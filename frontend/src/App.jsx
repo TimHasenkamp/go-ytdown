@@ -199,14 +199,20 @@ function App() {
             }
           }
 
-          eventSourceRef.current.onerror = () => {
-            console.log('[Restore] Failed to reconnect, clearing state')
-            eventSourceRef.current.close()
-            sessionStorage.removeItem('active_download')
-            setIsDownloading(false)
-            setProgress(0)
-            setProgressText('')
-            setMessage({ type: 'error', text: 'Download konnte nicht wiederhergestellt werden' })
+          eventSourceRef.current.onerror = (error) => {
+            console.error('[Restore] SSE error on reconnect:', error)
+            console.error('[Restore] ReadyState:', eventSourceRef.current?.readyState)
+
+            // ReadyState 2 = CLOSED, means the channel doesn't exist anymore
+            if (eventSourceRef.current?.readyState === 2) {
+              console.log('[Restore] Channel closed, download likely completed or failed')
+              eventSourceRef.current.close()
+              sessionStorage.removeItem('active_download')
+              setIsDownloading(false)
+              setProgress(0)
+              setProgressText('')
+              setMessage({ type: 'info', text: 'Download wurde bereits abgeschlossen' })
+            }
           }
         } else {
           // Too old, clear it

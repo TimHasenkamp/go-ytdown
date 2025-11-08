@@ -26,7 +26,16 @@ function App() {
   const debounceTimerRef = useRef(null)
   const resolveTimerRef = useRef(null)
   const lastActionsRef = useRef([])
-  const sessionIdRef = useRef(Math.random().toString(36).substring(7))
+
+  // Session persistence: Check sessionStorage first, then generate new ID
+  const getOrCreateSessionId = () => {
+    const stored = sessionStorage.getItem('download_session_id')
+    if (stored) return stored
+    const newId = Math.random().toString(36).substring(7)
+    sessionStorage.setItem('download_session_id', newId)
+    return newId
+  }
+  const sessionIdRef = useRef(getOrCreateSessionId())
 
   // Track user actions for error reporting
   const trackAction = (action) => {
@@ -125,6 +134,90 @@ function App() {
       return false
     }
   }
+
+  // Restore active download on page load
+  useEffect(() => {
+    const activeDownload = sessionStorage.getItem('active_download')
+    if (activeDownload) {
+      try {
+        const { sessionID, url: savedUrl, format: savedFormat, timestamp } = JSON.parse(activeDownload)
+
+        // Only restore if less than 10 minutes old
+        const age = Date.now() - timestamp
+        if (age < 10 * 60 * 1000) {
+          console.log('[Restore] Attempting to restore download session:', sessionID)
+
+          setUrl(savedUrl)
+          setFormat(savedFormat)
+          setIsDownloading(true)
+          setProgress(0)
+          setProgressText('Verbindung wird wiederhergestellt...')
+
+          // Reconnect to SSE
+          eventSourceRef.current = new EventSource(`/progress?session=${sessionID}`)
+
+          eventSourceRef.current.onopen = () => {
+            console.log('[Restore] SSE reconnected successfully')
+            trackAction('SSE reconnected after page reload')
+          }
+
+          eventSourceRef.current.onmessage = (event) => {
+            const update = JSON.parse(event.data)
+
+            if (update.error === true || update.progress === -1) {
+              eventSourceRef.current.close()
+              sessionStorage.removeItem('active_download')
+              setIsDownloading(false)
+              setProgress(0)
+              setProgressText('')
+              setMessage({ type: 'error', text: update.status })
+              addToast('error', update.status)
+              return
+            }
+
+            setProgress(update.progress)
+            setProgressText(update.status)
+
+            if (update.progress === 100) {
+              eventSourceRef.current.close()
+              sessionStorage.removeItem('active_download')
+
+              const filename = update.status.replace('Completed: ', '')
+              const downloadLink = document.createElement('a')
+              downloadLink.href = `/download-file/${encodeURIComponent(filename)}`
+              downloadLink.download = filename
+              document.body.appendChild(downloadLink)
+              downloadLink.click()
+              document.body.removeChild(downloadLink)
+
+              setIsDownloading(false)
+              setMessage({ type: 'success', text: 'Download abgeschlossen!' })
+              setTimeout(() => {
+                setProgress(0)
+                setProgressText('')
+              }, 300)
+            }
+          }
+
+          eventSourceRef.current.onerror = () => {
+            console.log('[Restore] Failed to reconnect, clearing state')
+            eventSourceRef.current.close()
+            sessionStorage.removeItem('active_download')
+            setIsDownloading(false)
+            setProgress(0)
+            setProgressText('')
+            setMessage({ type: 'error', text: 'Download konnte nicht wiederhergestellt werden' })
+          }
+        } else {
+          // Too old, clear it
+          sessionStorage.removeItem('active_download')
+        }
+      } catch (err) {
+        console.error('[Restore] Failed to restore download:', err)
+        sessionStorage.removeItem('active_download')
+      }
+    }
+  }, [])
 
   // GSAP Animations on Mount
   useEffect(() => {
@@ -347,6 +440,14 @@ function App() {
         const sessionID = data.message
         trackAction(`SSE connection started: session=${sessionID}`)
 
+        // Save active download to sessionStorage
+        sessionStorage.setItem('active_download', JSON.stringify({
+          sessionID,
+          url,
+          format,
+          timestamp: Date.now()
+        }))
+
         console.log('[SSE] Opening EventSource for session:', sessionID)
         eventSourceRef.current = new EventSource(`/progress?session=${sessionID}`)
 
@@ -364,6 +465,9 @@ function App() {
             eventSourceRef.current.close()
             console.log('[SSE] Error received from backend:', update.status)
             trackAction(`Download failed: ${update.status}`)
+
+            // Clean up session storage
+            sessionStorage.removeItem('active_download')
 
             setIsDownloading(false)
             setProgress(0)
@@ -397,6 +501,9 @@ function App() {
             downloadLink.click()
             document.body.removeChild(downloadLink)
 
+            // Clean up session storage
+            sessionStorage.removeItem('active_download')
+
             setIsDownloading(false)
             setMessage({ type: 'success', text: 'Download abgeschlossen!' })
             trackAction('File download triggered')
@@ -418,16 +525,26 @@ function App() {
             sessionID
           })
           eventSourceRef.current.close()
+
+          // Clean up session storage
+          sessionStorage.removeItem('active_download')
+
           setIsDownloading(false)
           setMessage({ type: 'error', text: 'Verbindungsfehler beim Fortschritt' })
         }
       } else {
+        // Clean up session storage
+        sessionStorage.removeItem('active_download')
+
         setIsDownloading(false)
         setMessage({ type: 'error', text: `Fehler: ${data.message}` })
         trackAction(`Download failed: ${data.message}`)
         reportError(new Error(data.message), { type: 'download_error', response: data })
       }
     } catch (error) {
+      // Clean up session storage
+      sessionStorage.removeItem('active_download')
+
       setIsDownloading(false)
       setMessage({ type: 'error', text: `Fehler: ${error.message}` })
       trackAction(`Download exception: ${error.message}`)
@@ -514,7 +631,7 @@ function App() {
               </AnimatePresence>
             </div>
 
-            <div className="form-group" style={{ marginBottom: '32px' }}>
+            <div className="form-group format-selection">
               <label>Format auswählen</label>
               <div className="format-grid">
                 {formats.map((fmt) => (

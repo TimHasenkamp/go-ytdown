@@ -464,13 +464,17 @@ func handleProgress(w http.ResponseWriter, r *http.Request) {
 	progressMutex.Unlock()
 	log.Printf("[SSE] Progress channel registered for session: %s", sessionID)
 
-	// Clean up on disconnect
+	// Clean up on disconnect (only if channel still exists)
 	defer func() {
 		progressMutex.Lock()
-		delete(progressClients, sessionID)
-		close(progressChan)
+		if ch, exists := progressClients[sessionID]; exists {
+			delete(progressClients, sessionID)
+			close(ch)
+			log.Printf("[SSE] Client disconnected, cleaned up session: %s", sessionID)
+		} else {
+			log.Printf("[SSE] Client disconnected, session already cleaned: %s", sessionID)
+		}
 		progressMutex.Unlock()
-		log.Printf("[SSE] Client disconnected for session: %s", sessionID)
 	}()
 
 	// Send updates to client
@@ -579,13 +583,21 @@ func sendProgress(sessionID string, progress int, status string) {
 	log.Printf("Progress [%s]: %d%% - %s", sessionID, progress, status)
 
 	progressMutex.RLock()
-	defer progressMutex.RUnlock()
+	ch, ok := progressClients[sessionID]
+	progressMutex.RUnlock()
 
-	if ch, ok := progressClients[sessionID]; ok {
+	if ok {
 		select {
 		case ch <- ProgressUpdate{Progress: progress, Status: status, Error: false}:
+			// If 100%, close the channel after sending final update
+			if progress == 100 {
+				progressMutex.Lock()
+				delete(progressClients, sessionID)
+				close(ch)
+				progressMutex.Unlock()
+			}
 		default:
-			// Client disconnected or channel full
+			// Client disconnected or channel full - already cleaned up
 		}
 	}
 }
@@ -594,17 +606,21 @@ func sendError(sessionID string, errorMsg string) {
 	log.Printf("Error [%s]: %s", sessionID, errorMsg)
 
 	progressMutex.RLock()
-	defer progressMutex.RUnlock()
+	ch, ok := progressClients[sessionID]
+	progressMutex.RUnlock()
 
-	if ch, ok := progressClients[sessionID]; ok {
+	if ok {
 		// Send error with progress -1 to signal error state
 		select {
 		case ch <- ProgressUpdate{Progress: -1, Status: errorMsg, Error: true}:
+			// Close the channel after sending error to stop SSE stream
+			progressMutex.Lock()
+			delete(progressClients, sessionID)
+			close(ch)
+			progressMutex.Unlock()
 		default:
-			// Client disconnected or channel full
+			// Client disconnected or channel full - already cleaned up
 		}
-		// Close the channel after sending error
-		close(ch)
 	}
 }
 

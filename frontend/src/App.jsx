@@ -8,7 +8,6 @@ import ShinyText from '@/components/ShinyText'
 import './App.css'
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('home')
   const [url, setUrl] = useState('')
   const [format, setFormat] = useState('mp3')
   const [isDownloading, setIsDownloading] = useState(false)
@@ -19,6 +18,7 @@ function App() {
   const [toasts, setToasts] = useState([])
   const [isCheckingUrl, setIsCheckingUrl] = useState(false)
   const [urlResolved, setUrlResolved] = useState(false)
+  const [legalModal, setLegalModal] = useState(null) // 'impressum', 'datenschutz', 'haftung', or null
 
   const eventSourceRef = useRef(null)
   const containerRef = useRef(null)
@@ -584,9 +584,7 @@ function App() {
         <div ref={containerRef} className="container">
           <div className="glass-effect" />
 
-          {currentPage === 'home' && (
-            <>
-              {/* Header */}
+          {/* Header */}
               <div className="header">
                 <h1 ref={titleRef} className="title-gradient">YouTube Downloader</h1>
                 <p className="subtitle">Videos und Audio in Top-Qualität herunterladen</p>
@@ -754,31 +752,130 @@ function App() {
               </motion.div>
             )}
           </AnimatePresence>
-            </>
-          )}
 
-          {currentPage === 'impressum' && (
-            <div className="page-content">
-              <h2>Impressum</h2>
-              <p>Hier kommt das Impressum rein.</p>
-            </div>
-          )}
-
-          {currentPage === 'disclaimer' && (
-            <div className="page-content">
-              <h2>Haftungsausschluss</h2>
-              <p>Hier kommt der Haftungsausschluss rein.</p>
-            </div>
-          )}
-
-          {currentPage === 'about' && (
-            <div className="page-content">
-              <h2>Über uns</h2>
-              <p>Hier kommen Informationen über uns rein.</p>
-            </div>
-          )}
+          {/* Footer */}
+          <motion.div
+            className="footer"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <button onClick={() => setLegalModal('impressum')} className="footer-link">
+              Impressum
+            </button>
+            <span className="footer-separator">•</span>
+            <button onClick={() => setLegalModal('datenschutz')} className="footer-link">
+              Datenschutz
+            </button>
+            <span className="footer-separator">•</span>
+            <button onClick={() => setLegalModal('haftung')} className="footer-link">
+              Haftungsausschluss
+            </button>
+          </motion.div>
         </div>
       </div>
+
+      {/* Legal Modal */}
+      <AnimatePresence>
+        {legalModal && (
+          <>
+            <motion.div
+              className="modal-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setLegalModal(null)}
+            />
+            <motion.div
+              className="modal"
+              initial={{ opacity: 0, scale: 0.85, y: 60, rotateX: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0, rotateX: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30, rotateX: -5 }}
+              transition={{
+                type: 'spring',
+                damping: 20,
+                stiffness: 300,
+                mass: 0.8
+              }}
+            >
+              <button className="modal-close" onClick={() => setLegalModal(null)}>
+                <X size={24} />
+              </button>
+
+              <div className="modal-content">
+                {legalModal === 'impressum' && (
+                  <>
+                    <h2>Impressum</h2>
+                    <div className="legal-text">
+                      <h3>Angaben gemäß § 5 TMG</h3>
+                      <p>
+                        [Dein Name]<br />
+                        [Deine Straße und Hausnummer]<br />
+                        [PLZ und Ort]
+                      </p>
+
+                      <h3>Kontakt</h3>
+                      <p>
+                        E-Mail: [deine@email.de]
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {legalModal === 'datenschutz' && (
+                  <>
+                    <h2>Datenschutzerklärung</h2>
+                    <div className="legal-text">
+                      <h3>1. Datenschutz auf einen Blick</h3>
+                      <p>
+                        Diese Website verwendet keine Cookies und speichert keine personenbezogenen Daten dauerhaft.
+                        SessionStorage wird nur temporär für die Funktionalität verwendet und wird beim Schließen des Browsers gelöscht.
+                      </p>
+
+                      <h3>2. Hosting</h3>
+                      <p>
+                        Diese Website wird gehostet bei [Dein Hosting-Provider].
+                      </p>
+
+                      <h3>3. Verwendete Technologien</h3>
+                      <p>
+                        - SessionStorage: Wird nur für aktive Downloads verwendet<br />
+                        - Keine Cookies<br />
+                        - Keine Tracking-Tools
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {legalModal === 'haftung' && (
+                  <>
+                    <h2>Haftungsausschluss</h2>
+                    <div className="legal-text">
+                      <h3>Haftung für Inhalte</h3>
+                      <p>
+                        Die Inhalte unserer Seiten wurden mit größter Sorgfalt erstellt.
+                        Für die Richtigkeit, Vollständigkeit und Aktualität der Inhalte können wir jedoch keine Gewähr übernehmen.
+                      </p>
+
+                      <h3>Urheberrecht</h3>
+                      <p>
+                        Bitte beachte die Urheberrechte der YouTube-Inhalte.
+                        Downloads sind nur für privaten Gebrauch und mit Zustimmung des Urhebers erlaubt.
+                      </p>
+
+                      <h3>Nutzung</h3>
+                      <p>
+                        Die Nutzung dieses Tools erfolgt auf eigene Verantwortung.
+                        Wir übernehmen keine Haftung für die heruntergeladenen Inhalte.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Toast Container */}
       <div className="toast-container">

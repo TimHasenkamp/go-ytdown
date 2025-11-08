@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Europe/Berlin
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}  # Set in .env or export before running
     volumes:
       - ./downloads:/app/downloads
     healthcheck:

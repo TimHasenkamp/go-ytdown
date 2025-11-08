@@ -6,7 +6,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
-
+.env
 # Logs
 *.log
 npm-debug.log*
@@ -26,6 +26,7 @@ lerna-debug.log*
 # Gilt repo-weit und für z.B. ./backend, ./server, etc.
 # -----------------------------
 # Build-Outputs / Binaries
+downloads/
 bin/
 **/bin/
 build/

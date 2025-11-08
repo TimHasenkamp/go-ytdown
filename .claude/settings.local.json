@@ -21,7 +21,8 @@
       "Bash(podman exec:*)",
       "Bash(podman inspect:*)",
       "Bash(python3:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

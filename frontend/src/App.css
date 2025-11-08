@@ -650,6 +650,10 @@ label {
     font-size: 16px;
   }
 
+  .glass-effect {
+    display: none;
+  }
+
   .toast-container {
     top: 16px;
     right: 16px;

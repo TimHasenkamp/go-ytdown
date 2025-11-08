@@ -27,6 +27,13 @@ function App() {
   const resolveTimerRef = useRef(null)
   const lastActionsRef = useRef([])
 
+  // Detect iOS Safari
+  const isIOSSafari = () => {
+    const ua = navigator.userAgent
+    const iOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream
+    return iOS
+  }
+
   // Session persistence: Check sessionStorage first, then generate new ID
   const getOrCreateSessionId = () => {
     const stored = sessionStorage.getItem('download_session_id')
@@ -183,12 +190,7 @@ function App() {
               sessionStorage.removeItem('active_download')
 
               const filename = update.status.replace('Completed: ', '')
-              const downloadLink = document.createElement('a')
-              downloadLink.href = `/download-file/${encodeURIComponent(filename)}`
-              downloadLink.download = filename
-              document.body.appendChild(downloadLink)
-              downloadLink.click()
-              document.body.removeChild(downloadLink)
+              triggerDownload(filename)
 
               setIsDownloading(false)
               setMessage({ type: 'success', text: 'Download abgeschlossen!' })
@@ -405,6 +407,27 @@ function App() {
     setToasts(prev => prev.filter(toast => toast.id !== id))
   }
 
+  // Handle file download with iOS Safari compatibility
+  const triggerDownload = (filename) => {
+    const downloadUrl = `/download-file/${encodeURIComponent(filename)}`
+
+    if (isIOSSafari()) {
+      // iOS Safari: Open in new tab with instructions
+      addToast('info', 'iOS: Datei wird in neuem Tab geöffnet. Tippe auf "Teilen" → "Datei sichern"')
+      window.open(downloadUrl, '_blank')
+      trackAction('iOS download: opened in new tab')
+    } else {
+      // Other browsers: Use download attribute
+      const downloadLink = document.createElement('a')
+      downloadLink.href = downloadUrl
+      downloadLink.download = filename
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      document.body.removeChild(downloadLink)
+      trackAction('Standard download triggered')
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     trackAction(`Download initiated: format=${format}, url=${url.substring(0, 50)}...`)
@@ -503,19 +526,13 @@ function App() {
             console.log('[Download] Attempting download for:', filename)
             console.log('[Download] Encoded URL:', `/download-file/${encodeURIComponent(filename)}`)
 
-            const downloadLink = document.createElement('a')
-            downloadLink.href = `/download-file/${encodeURIComponent(filename)}`
-            downloadLink.download = filename
-            document.body.appendChild(downloadLink)
-            downloadLink.click()
-            document.body.removeChild(downloadLink)
+            triggerDownload(filename)
 
             // Clean up session storage
             sessionStorage.removeItem('active_download')
 
             setIsDownloading(false)
             setMessage({ type: 'success', text: 'Download abgeschlossen!' })
-            trackAction('File download triggered')
 
             setTimeout(() => {
               setProgress(0)
@@ -897,6 +914,7 @@ function App() {
                   {toast.type === 'success' && <CheckCircle size={20} />}
                   {toast.type === 'error' && <XCircle size={20} />}
                   {toast.type === 'warning' && <AlertTriangle size={20} />}
+                  {toast.type === 'info' && <Info size={20} />}
                 </div>
                 <div className="toast-text">{toast.text}</div>
               </div>

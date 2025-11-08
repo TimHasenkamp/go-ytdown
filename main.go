@@ -702,41 +702,43 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 
 	var args []string
 
+	// Common args for all formats
+	commonArgs := []string{
+		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"--no-playlist",
+	}
+
 	switch format {
 	case "mp4":
-		args = []string{
+		args = append(commonArgs,
 			"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
 			"--merge-output-format", "mp4",
-			"--no-playlist",
 			"-o", outputTemplate,
 			url,
-		}
+		)
 	case "mp3":
-		args = []string{
+		args = append(commonArgs,
 			"-x",
 			"--audio-format", "mp3",
 			"--audio-quality", "0",
-			"--no-playlist",
 			"-o", outputTemplate,
 			url,
-		}
+		)
 	case "wav":
-		args = []string{
+		args = append(commonArgs,
 			"-x",
 			"--audio-format", "wav",
-			"--no-playlist",
 			"-o", outputTemplate,
 			url,
-		}
+		)
 	case "m4a":
-		args = []string{
+		args = append(commonArgs,
 			"-x",
 			"--audio-format", "m4a",
 			"--audio-quality", "0",
-			"--no-playlist",
 			"-o", outputTemplate,
 			url,
-		}
+		)
 	default:
 		return "", fmt.Errorf("unsupported format: %s", format)
 	}
@@ -844,12 +846,15 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 	if err := cmd.Wait(); err != nil {
 		errorMsg := stderrOutput.String()
 
+		// Log full stderr for debugging
+		log.Printf("[yt-dlp] Full stderr output for session %s:\n%s", sessionID, errorMsg)
+
 		// Report to Slack for critical errors
 		reportBackendError(fmt.Sprintf("yt-dlp failed: %v", err), map[string]string{
 			"url":     url,
 			"format":  format,
 			"session": sessionID,
-			"stderr":  truncateString(errorMsg, 500),
+			"stderr":  truncateString(errorMsg, 1000), // Increased from 500 to 1000
 		})
 
 		// Check for specific error conditions
@@ -1056,7 +1061,11 @@ func handleCheckFormats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run yt-dlp with format listing and JSON output for detailed info
-	cmd := exec.Command("yt-dlp", "-F", "--no-warnings", cleanedURL)
+	cmd := exec.Command("yt-dlp",
+		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"-F",
+		"--no-warnings",
+		cleanedURL)
 	output, err := cmd.CombinedOutput()
 
 	response := FormatCheckResponse{

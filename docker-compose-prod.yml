@@ -1,11 +1,9 @@
-# Local Development Docker Compose
-# Builds everything from source using Dockerfile
+# Production Docker Compose
+# Uses pre-built image from GitHub Container Registry
 services:
   ytdownloader:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ytdownloader-dev
+    image: ghcr.io/timhasenkamp/go-ytdown:latest
+    container_name: ytdownloader
     ports:
       - "8000:8080"
     restart: unless-stopped

@@ -20,7 +20,8 @@
       "Bash(podman exec ytdownloader sh -c \"yt-dlp --verbose --list-extractors 2>&1 | grep -i pot || yt-dlp -v ''https://www.youtube.com/watch?v=jNQXAC9IVRw'' --skip-download 2>&1 | grep -i ''bgutil\\|pot\\|provider'' | head -10\")",
       "Bash(podman exec:*)",
       "Bash(podman inspect:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

@@ -259,17 +259,26 @@ function App() {
       if (data.success) {
         const sessionID = data.message
 
+        console.log('[SSE] Opening EventSource for session:', sessionID)
         eventSourceRef.current = new EventSource(`/progress?session=${sessionID}`)
 
+        eventSourceRef.current.onopen = () => {
+          console.log('[SSE] Connection opened successfully')
+        }
+
         eventSourceRef.current.onmessage = (event) => {
+          console.log('[SSE] Message received:', event.data)
           const update = JSON.parse(event.data)
           setProgress(update.progress)
           setProgressText(update.status)
 
           if (update.progress === 100) {
             eventSourceRef.current.close()
+            console.log('[SSE] Connection closed (100% reached)')
 
             const filename = update.status.replace('Completed: ', '')
+            console.log('[Download] Attempting download for:', filename)
+            console.log('[Download] Encoded URL:', `/download-file/${encodeURIComponent(filename)}`)
 
             const downloadLink = document.createElement('a')
             downloadLink.href = `/download-file/${encodeURIComponent(filename)}`
@@ -289,7 +298,8 @@ function App() {
         }
 
         eventSourceRef.current.onerror = (error) => {
-          console.error('EventSource error:', error)
+          console.error('[SSE] Error occurred:', error)
+          console.error('[SSE] ReadyState:', eventSourceRef.current?.readyState)
           eventSourceRef.current.close()
           setIsDownloading(false)
           setMessage({ type: 'error', text: 'Verbindungsfehler beim Fortschritt' })

@@ -638,7 +638,15 @@ func sendProgress(sessionID string, progress int, status string) {
 	if progress == 100 {
 		progressMutex.Lock()
 		for _, ch := range progressClients[sessionID] {
-			close(ch)
+			// Use defer + recover to prevent panic if channel already closed
+			func(c chan ProgressUpdate) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[SSE] Channel already closed for session %s", sessionID)
+					}
+				}()
+				close(c)
+			}(ch)
 		}
 		delete(progressClients, sessionID)
 
@@ -672,7 +680,15 @@ func sendError(sessionID string, errorMsg string) {
 
 	// Close all channels and cache the error for reconnects
 	for _, ch := range clients {
-		close(ch)
+		// Use defer + recover to prevent panic if channel already closed
+		func(c chan ProgressUpdate) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[SSE] Channel already closed for session %s", sessionID)
+				}
+			}()
+			close(c)
+		}(ch)
 	}
 	delete(progressClients, sessionID)
 
@@ -691,7 +707,7 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 	// Create downloads directory if it doesn't exist
 	downloadsDir := "./downloads"
 	if err := os.MkdirAll(downloadsDir, 0755); err != nil {
-		return "", fmt.Errorf("Fehler beim Erstellen des Download-Verzeichnisses")
+		return "", fmt.Errorf("Fehler beim Erstellen des Download-Verzeichnisses: %v", err)
 	}
 
 	sendProgress(sessionID, 10, "Download wird gestartet...")

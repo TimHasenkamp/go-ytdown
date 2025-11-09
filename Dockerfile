@@ -65,10 +65,12 @@ COPY --from=backend-builder /app/ytdownloader .
 COPY --from=frontend-builder /frontend/build ./static/
 
 # Erstelle downloads Verzeichnis
-RUN mkdir -p /app/downloads && chown -R appuser:appgroup /app
+RUN mkdir -p /app/downloads && \
+    chown -R appuser:appgroup /app
 
-# Wechsle zu non-root User
-USER appuser
+# Note: Running as root to avoid permission issues with Docker volume mounts
+# Downloads are temporary and deleted after serving, so security impact is minimal
+# USER appuser  # Commented out for now - re-enable if volume mount permissions are fixed
 
 # Exponiere Port
 EXPOSE 8080

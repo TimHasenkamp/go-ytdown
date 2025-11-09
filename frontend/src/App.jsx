@@ -252,6 +252,7 @@ function App() {
         y: isMobile ? 0 : 40,
         stagger: isMobile ? 0 : 0.03,
         ease: 'power3.out',
+        clearProps: 'opacity,transform',
       })
 
       // Container animation - no opacity on mobile
@@ -260,6 +261,7 @@ function App() {
         opacity: isMobile ? 1 : 0,
         ease: 'power3.out',
         delay: 0.1,
+        clearProps: 'opacity',
       })
 
       // Animate format cards - no opacity on mobile
@@ -269,6 +271,7 @@ function App() {
         stagger: isMobile ? 0 : 0.08,
         ease: 'power2.out',
         delay: isMobile ? 0 : 0.6,
+        clearProps: 'transform',
       })
     })
 

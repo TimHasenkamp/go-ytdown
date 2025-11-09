@@ -245,32 +245,32 @@ function App() {
     const isMobile = window.innerWidth <= 768
 
     const ctx = gsap.context(() => {
-      // Split text animation - no opacity on mobile
+      // Split text animation - shorter on mobile
       gsap.from('.char', {
-        duration: isMobile ? 0.3 : 0.6,
-        opacity: isMobile ? 1 : 0,
-        y: isMobile ? 0 : 40,
-        stagger: isMobile ? 0 : 0.03,
+        duration: isMobile ? 0.4 : 0.6,
+        opacity: 0,
+        y: isMobile ? 20 : 40,
+        stagger: isMobile ? 0.015 : 0.03,
         ease: 'power3.out',
         clearProps: 'opacity,transform',
       })
 
-      // Container animation - no opacity on mobile
+      // Container animation - shorter on mobile
       gsap.from(containerRef.current, {
-        duration: isMobile ? 0.3 : 0.6,
-        opacity: isMobile ? 1 : 0,
+        duration: isMobile ? 0.4 : 0.6,
+        opacity: 0,
         ease: 'power3.out',
         delay: 0.1,
         clearProps: 'opacity',
       })
 
-      // Animate format cards - no opacity on mobile
+      // Animate format cards - shorter on mobile
       gsap.from('.format-card', {
-        duration: isMobile ? 0.3 : 0.5,
-        y: isMobile ? 0 : 20,
-        stagger: isMobile ? 0 : 0.08,
+        duration: isMobile ? 0.4 : 0.5,
+        y: isMobile ? 15 : 20,
+        stagger: isMobile ? 0.05 : 0.08,
         ease: 'power2.out',
-        delay: isMobile ? 0 : 0.6,
+        delay: isMobile ? 0.3 : 0.6,
         clearProps: 'transform',
       })
     })

@@ -38,13 +38,14 @@ type ProgressUpdate struct {
 }
 
 type FormatCheckResponse struct {
-	Success        bool     `json:"success"`
-	Message        string   `json:"message,omitempty"`
-	HasSABR        bool     `json:"hasSABR"`
-	BestVideoInfo  string   `json:"bestVideoInfo,omitempty"`
-	BestAudioInfo  string   `json:"bestAudioInfo,omitempty"`
-	Warnings       []string `json:"warnings,omitempty"`
-	SelectedFormat string   `json:"selectedFormat,omitempty"`
+	Success        bool              `json:"success"`
+	Message        string            `json:"message,omitempty"`
+	HasSABR        bool              `json:"hasSABR"`
+	BestVideoInfo  string            `json:"bestVideoInfo,omitempty"`
+	BestAudioInfo  string            `json:"bestAudioInfo,omitempty"`
+	Warnings       []string          `json:"warnings,omitempty"`
+	SelectedFormat string            `json:"selectedFormat,omitempty"`
+	QualityInfo    map[string]string `json:"qualityInfo,omitempty"` // Quality info per format
 }
 
 type ResolveRequest struct {
@@ -1085,9 +1086,10 @@ func handleCheckFormats(w http.ResponseWriter, r *http.Request) {
 	output, err := cmd.CombinedOutput()
 
 	response := FormatCheckResponse{
-		Success:  true,
-		HasSABR:  false,
-		Warnings: []string{},
+		Success:     true,
+		HasSABR:     false,
+		Warnings:    []string{},
+		QualityInfo: make(map[string]string),
 	}
 
 	outputStr := string(output)
@@ -1113,19 +1115,53 @@ func handleCheckFormats(w http.ResponseWriter, r *http.Request) {
 
 	// Parse format output to get best quality info
 	lines := strings.Split(outputStr, "\n")
+	bestVideoResolution := ""
+	bestAudioBitrate := ""
+
+	// Regex patterns for extracting quality information
+	videoResPattern := regexp.MustCompile(`(\d{3,4})p`)
+	audioBitratePattern := regexp.MustCompile(`(\d+)k`)
+
 	for _, line := range lines {
 		// Look for best video format lines (usually contains resolution like 1080p, 720p)
-		if strings.Contains(line, "mp4") && (strings.Contains(line, "1080p") || strings.Contains(line, "720p") || strings.Contains(line, "2160p")) {
+		if strings.Contains(line, "mp4") && (strings.Contains(line, "1080p") || strings.Contains(line, "720p") || strings.Contains(line, "2160p") || strings.Contains(line, "4320p")) {
 			if response.BestVideoInfo == "" {
 				response.BestVideoInfo = strings.TrimSpace(line)
 			}
+
+			// Extract resolution
+			if matches := videoResPattern.FindStringSubmatch(line); len(matches) > 1 {
+				res := matches[1]
+				if bestVideoResolution == "" || parseResolution(res) > parseResolution(bestVideoResolution) {
+					bestVideoResolution = res + "p"
+				}
+			}
 		}
 		// Look for best audio format
-		if strings.Contains(line, "audio only") && (strings.Contains(line, "m4a") || strings.Contains(line, "webm")) {
+		if strings.Contains(line, "audio only") && (strings.Contains(line, "m4a") || strings.Contains(line, "webm") || strings.Contains(line, "opus")) {
 			if response.BestAudioInfo == "" {
 				response.BestAudioInfo = strings.TrimSpace(line)
 			}
+
+			// Extract bitrate
+			if matches := audioBitratePattern.FindStringSubmatch(line); len(matches) > 1 {
+				bitrate := matches[1]
+				if bestAudioBitrate == "" || parseInt(bitrate) > parseInt(bestAudioBitrate) {
+					bestAudioBitrate = bitrate + "kbps"
+				}
+			}
 		}
+	}
+
+	// Set quality info for each format with user-friendly labels
+	if bestVideoResolution != "" {
+		response.QualityInfo["mp4"] = formatQualityLabel(bestVideoResolution, true)
+	}
+	if bestAudioBitrate != "" {
+		audioLabel := formatQualityLabel(bestAudioBitrate, false)
+		response.QualityInfo["mp3"] = audioLabel
+		response.QualityInfo["wav"] = audioLabel
+		response.QualityInfo["m4a"] = audioLabel
 	}
 
 	// Determine what will actually be downloaded based on format
@@ -1441,6 +1477,49 @@ func handleTestSlack(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Test notification sent to Slack! Check your channel.",
 	})
+}
+
+// parseResolution converts resolution string to int for comparison
+func parseResolution(res string) int {
+	resInt, err := strconv.Atoi(res)
+	if err != nil {
+		return 0
+	}
+	return resInt
+}
+
+// parseInt converts string to int for comparison
+func parseInt(s string) int {
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return val
+}
+
+// formatQualityLabel converts technical values to user-friendly labels
+func formatQualityLabel(value string, isVideo bool) string {
+	if isVideo {
+		// Video quality labels
+		switch value {
+		case "2160p", "4320p":
+			return "4K Ultra HD"
+		case "1440p":
+			return "2K QHD"
+		case "1080p":
+			return "Full HD"
+		case "720p":
+			return "HD"
+		case "480p":
+			return "SD"
+		default:
+			return value
+		}
+	} else {
+		// Audio quality labels - keep original bitrate for frontend to display
+		// Frontend will show "Bestmöglich" and show kbps on hover
+		return value
+	}
 }
 
 // cleanupCompletedDownloads runs periodically to remove old completed downloads from cache

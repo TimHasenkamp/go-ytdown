@@ -46,7 +46,7 @@ const SpotlightCard = ({
       onMouseLeave={handleMouseLeave}
       onClick={onClick}
       className={`relative rounded-2xl border overflow-hidden cursor-pointer ${className}`}
-      style={{ borderColor: 'rgba(255, 255, 255, 0.08)', backgroundColor: '#1a1a1a', padding: '24px 16px' }}>
+      style={{ borderColor: 'rgba(255, 255, 255, 0.08)', backgroundColor: '#1a1a1a', padding: '24px 16px 48px 16px' }}>
       <div
         className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 ease-in-out"
         style={{

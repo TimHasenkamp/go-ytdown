@@ -18,7 +18,7 @@ function App() {
   const [toasts, setToasts] = useState([])
   const [isCheckingUrl, setIsCheckingUrl] = useState(false)
   const [urlResolved, setUrlResolved] = useState(false)
-  const [legalModal, setLegalModal] = useState(null) // 'impressum', 'datenschutz', 'haftung', or null
+  const [qualityInfo, setQualityInfo] = useState({}) // Quality info for each format
 
   const eventSourceRef = useRef(null)
   const containerRef = useRef(null)
@@ -370,6 +370,11 @@ function App() {
           setIsCheckingUrl(false)
 
           if (data.success) {
+            // Store quality info
+            if (data.qualityInfo) {
+              setQualityInfo(data.qualityInfo)
+            }
+
             // Show success toast with quality info
             let toastMessage = 'URL gültig!'
             if (data.hasSABR && data.warnings.length > 0) {
@@ -379,6 +384,7 @@ function App() {
             }
           } else {
             addToast('error', 'Ungültige URL')
+            setQualityInfo({})
           }
         } catch (error) {
           setIsCheckingUrl(false)
@@ -588,6 +594,25 @@ function App() {
     { value: 'mp4', label: 'MP4', icon: Video, desc: 'Beste Videoqualität' },
   ]
 
+  // Format quality label for display
+  const formatQualityLabel = (value, formatType) => {
+    if (!value) return null
+
+    // For audio formats, show "Bestmöglich" with kbps in title
+    if (['mp3', 'wav', 'm4a'].includes(formatType)) {
+      return {
+        display: 'Bestmöglich',
+        tooltip: value // e.g. "160kbps"
+      }
+    }
+
+    // For video, just show the label
+    return {
+      display: value,
+      tooltip: value
+    }
+  }
+
   const handleFormatClick = (fmt) => {
     if (isDownloading) return
     trackAction(`Format changed: ${format} → ${fmt.value}`)
@@ -677,6 +702,20 @@ function App() {
                       )}
                     </div>
                     <div className="format-desc">{fmt.desc}</div>
+                    {qualityInfo[fmt.value] && (() => {
+                      const qualityLabel = formatQualityLabel(qualityInfo[fmt.value], fmt.value)
+                      return qualityLabel ? (
+                        <motion.div
+                          className="quality-badge"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.1 }}
+                          title={qualityLabel.tooltip}
+                        >
+                          {qualityLabel.display}
+                        </motion.div>
+                      ) : null
+                    })()}
                     {format === fmt.value && (
                       <div className="selected-badge">
                         <Check size={14} strokeWidth={3} />
@@ -783,122 +822,21 @@ function App() {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5 }}
           >
-            <button onClick={() => setLegalModal('impressum')} className="footer-link">
+            <a href="/legal.html#impressum" className="footer-link" style={{ textDecoration: 'none' }}>
               Impressum
-            </button>
+            </a>
             <span className="footer-separator">•</span>
-            <button onClick={() => setLegalModal('datenschutz')} className="footer-link">
+            <a href="/legal.html#datenschutz" className="footer-link" style={{ textDecoration: 'none' }}>
               Datenschutz
-            </button>
+            </a>
             <span className="footer-separator">•</span>
-            <button onClick={() => setLegalModal('haftung')} className="footer-link">
+            <a href="/legal.html#haftungsausschluss" className="footer-link" style={{ textDecoration: 'none' }}>
               Haftungsausschluss
-            </button>
+            </a>
           </motion.div>
         </div>
       </div>
 
-      {/* Legal Modal */}
-      <AnimatePresence>
-        {legalModal && (
-          <>
-            <motion.div
-              className="modal-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setLegalModal(null)}
-            />
-            <motion.div
-              className="modal"
-              initial={{ opacity: 0, scale: 0.85, y: 60, rotateX: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0, rotateX: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 30, rotateX: -5 }}
-              transition={{
-                type: 'spring',
-                damping: 20,
-                stiffness: 300,
-                mass: 0.8
-              }}
-            >
-              <button className="modal-close" onClick={() => setLegalModal(null)}>
-                <X size={24} />
-              </button>
-
-              <div className="modal-content">
-                {legalModal === 'impressum' && (
-                  <>
-                    <h2>Impressum</h2>
-                    <div className="legal-text">
-                      <h3>Angaben gemäß § 5 TMG</h3>
-                      <p>
-                        [Dein Name]<br />
-                        [Deine Straße und Hausnummer]<br />
-                        [PLZ und Ort]
-                      </p>
-
-                      <h3>Kontakt</h3>
-                      <p>
-                        E-Mail: [deine@email.de]
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {legalModal === 'datenschutz' && (
-                  <>
-                    <h2>Datenschutzerklärung</h2>
-                    <div className="legal-text">
-                      <h3>1. Datenschutz auf einen Blick</h3>
-                      <p>
-                        Diese Website verwendet keine Cookies und speichert keine personenbezogenen Daten dauerhaft.
-                        SessionStorage wird nur temporär für die Funktionalität verwendet und wird beim Schließen des Browsers gelöscht.
-                      </p>
-
-                      <h3>2. Hosting</h3>
-                      <p>
-                        Diese Website wird gehostet bei [Dein Hosting-Provider].
-                      </p>
-
-                      <h3>3. Verwendete Technologien</h3>
-                      <p>
-                        - SessionStorage: Wird nur für aktive Downloads verwendet<br />
-                        - Keine Cookies<br />
-                        - Keine Tracking-Tools
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {legalModal === 'haftung' && (
-                  <>
-                    <h2>Haftungsausschluss</h2>
-                    <div className="legal-text">
-                      <h3>Haftung für Inhalte</h3>
-                      <p>
-                        Die Inhalte unserer Seiten wurden mit größter Sorgfalt erstellt.
-                        Für die Richtigkeit, Vollständigkeit und Aktualität der Inhalte können wir jedoch keine Gewähr übernehmen.
-                      </p>
-
-                      <h3>Urheberrecht</h3>
-                      <p>
-                        Bitte beachte die Urheberrechte der YouTube-Inhalte.
-                        Downloads sind nur für privaten Gebrauch und mit Zustimmung des Urhebers erlaubt.
-                      </p>
-
-                      <h3>Nutzung</h3>
-                      <p>
-                        Die Nutzung dieses Tools erfolgt auf eigene Verantwortung.
-                        Wir übernehmen keine Haftung für die heruntergeladenen Inhalte.
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
       {/* Toast Container */}
       <div className="toast-container">

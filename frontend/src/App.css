@@ -288,7 +288,7 @@ label {
   color: #fafafa;
   font-weight: 600;
   font-size: 1.2em;
-  margin-bottom: 6px;
+  margin-bottom: 16px;
   letter-spacing: 0.5px;
 }
 
@@ -311,6 +311,36 @@ label {
   justify-content: center;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5);
   color: white;
+}
+
+.quality-badge {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(22, 163, 74, 0.25));
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.65em;
+  font-weight: 600;
+  color: #22c55e;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 12px rgba(34, 197, 94, 0.3);
+  white-space: nowrap;
+  cursor: help;
+  transition: all 0.2s ease;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.quality-badge:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.35), rgba(22, 163, 74, 0.35));
+  border-color: rgba(34, 197, 94, 0.7);
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.4);
+  transform: translateX(-50%) scale(1.05);
 }
 
 .card-shine {
@@ -746,6 +776,17 @@ label {
     height: 20px;
     top: 8px;
     right: 8px;
+  }
+
+  .quality-badge {
+    font-size: 0.6em;
+    padding: 3px 8px;
+    top: 10px;
+    right: 40px;
+  }
+
+  .quality-badge:hover {
+    transform: scale(1.03);
   }
 
   .submit-button {

@@ -47,7 +47,7 @@ RUN apk add --no-cache \
     unzip \
     nodejs \
     && pip3 install --break-system-packages --no-cache-dir --upgrade pip \
-    && pip3 install --break-system-packages --no-cache-dir git+https://github.com/yt-dlp/yt-dlp.git@master \
+    && pip3 install --break-system-packages --no-cache-dir "yt-dlp[default]" \
     && pip3 install --break-system-packages --no-cache-dir bgutil-ytdlp-pot-provider
 
 # Erstelle non-root User

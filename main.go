@@ -723,6 +723,18 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 	commonArgs := []string{
 		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 		"--no-playlist",
+		"--js-runtimes", "node",
+	}
+
+	// Use cookies file if available (needed for age-restricted videos)
+	cookiesPath := "/app/cookies.txt"
+	if _, err := os.Stat(cookiesPath); err == nil {
+		commonArgs = append(commonArgs, "--cookies", cookiesPath)
+	}
+
+	// Configure bgutil POT provider URL if set (for Docker Compose networking)
+	if bgutilURL := os.Getenv("BGUTIL_BASE_URL"); bgutilURL != "" {
+		commonArgs = append(commonArgs, "--extractor-args", "youtubepot-bgutilhttp:base_url="+bgutilURL)
 	}
 
 	switch format {
@@ -893,8 +905,11 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 		if strings.Contains(errorMsg, "copyright") {
 			return "", fmt.Errorf("Video ist urheberrechtlich geschützt und kann nicht heruntergeladen werden")
 		}
-		if strings.Contains(errorMsg, "Sign in") || strings.Contains(errorMsg, "age") {
+		if strings.Contains(errorMsg, "Sign in") || strings.Contains(errorMsg, "age-restricted") || strings.Contains(errorMsg, "age gate") || strings.Contains(errorMsg, "confirm your age") {
 			return "", fmt.Errorf("Video erfordert Altersbeschränkung oder Anmeldung")
+		}
+		if strings.Contains(errorMsg, "HTTP Error 403") {
+			return "", fmt.Errorf("Zugriff verweigert (403). Möglicherweise wird das Video durch YouTube blockiert")
 		}
 		if strings.Contains(errorMsg, "network") || strings.Contains(errorMsg, "connection") {
 			return "", fmt.Errorf("Netzwerkfehler. Bitte überprüfe deine Internetverbindung")

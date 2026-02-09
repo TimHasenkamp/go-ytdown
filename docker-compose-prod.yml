@@ -9,12 +9,21 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Europe/Berlin
-      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}  # Set in .env or export before running
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - BGUTIL_BASE_URL=http://bgutil-provider:4416
     volumes:
       - ./downloads:/app/downloads
+      - ./cookies.txt:/app/cookies.txt:ro
+    depends_on:
+      - bgutil-provider
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: bgutil-provider
+    restart: unless-stopped

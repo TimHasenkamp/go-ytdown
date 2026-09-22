@@ -100,3 +100,9 @@ storybook-static/
 # -----------------------------
 # docker-compose.override.yml
 # .env.docker
+
+# -----------------------------
+# YouTube-Cookies: enthalten eine gueltige Anmeldesitzung.
+# Wer die Datei hat, hat Zugriff auf das Konto - niemals committen.
+# -----------------------------
+cookies.txt

@@ -48,3 +48,6 @@ frontend/.cache
 
 # Old static files
 static/
+
+# Cookies werden zur Laufzeit gemountet, nie ins Image gebacken
+cookies.txt

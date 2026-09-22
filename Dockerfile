@@ -1,5 +1,7 @@
 # Stage 1: React Frontend Build
-FROM node:18-alpine AS frontend-builder
+# Node 20+ ist Pflicht: Vite 8 verlangt ^20.19.0 || >=22.12.0.
+# Node 18 ist ausserdem seit April 2025 End-of-Life.
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /frontend
 

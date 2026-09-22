@@ -1,19 +1,32 @@
 # Production Docker Compose
 # Uses pre-built image from GitHub Container Registry
+#
+# Diese Datei bildet die Produktion 1:1 ab und kann direkt auf den Server
+# kopiert werden. Weicht sie von /opt/ytdownloader/docker-compose.yml ab,
+# ist das ein Fehler - genau diese Drift hat den POT-Provider verschwinden
+# lassen und Downloads monatelang in HTTP 403 laufen lassen.
 services:
   ytdownloader:
     image: ghcr.io/timhasenkamp/go-ytdown:latest
     container_name: ytdownloader
     ports:
-      - "8000:8080"
+      # 9000 ist der Port, auf den der Reverse Proxy fuer
+      # music.hasenkamp.dev zeigt - nicht ohne Proxy-Anpassung aendern.
+      - "9000:8080"
     restart: unless-stopped
     environment:
       - TZ=Europe/Berlin
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      # Ohne diese Variable sucht yt-dlp den POT-Provider auf 127.0.0.1:4416
+      # und YouTube lehnt die meisten Formate mit HTTP 403 ab.
       - BGUTIL_BASE_URL=http://bgutil-provider:4416
     volumes:
       - ./downloads:/app/downloads
-      - ./cookies.txt:/app/cookies.txt:ro
+      # Cookies fuer altersbeschraenkte Videos: erst eine echte cookies.txt
+      # neben dieser Datei anlegen (siehe .env.example), dann die naechste
+      # Zeile aktivieren. Fehlt die Datei, legt Docker beim Mount ein
+      # Verzeichnis an und die Cookies werden ignoriert.
+      # - ./cookies.txt:/app/cookies.txt:ro
     depends_on:
       - bgutil-provider
     healthcheck:
@@ -23,6 +36,7 @@ services:
       retries: 3
       start_period: 5s
 
+  # Stellt die PO-Tokens aus, die YouTube fuer die Videostreams verlangt.
   bgutil-provider:
     image: brainicism/bgutil-ytdlp-pot-provider
     container_name: bgutil-provider

@@ -15,7 +15,11 @@ services:
       - BGUTIL_BASE_URL=http://bgutil-provider:4416
     volumes:
       - ./downloads:/app/downloads
-      - ./cookies.txt:/app/cookies.txt:ro
+      # Cookies fuer altersbeschraenkte Videos: erst eine echte cookies.txt
+      # im Projektverzeichnis anlegen (siehe .env.example), dann die naechste
+      # Zeile aktivieren. Fehlt die Datei, legt Docker beim Mount ein
+      # Verzeichnis an und die Cookies werden ignoriert.
+      # - ./cookies.txt:/app/cookies.txt:ro
     depends_on:
       - bgutil-provider
     healthcheck:

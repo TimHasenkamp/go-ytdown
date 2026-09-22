@@ -131,6 +131,9 @@ func main() {
 		log.Printf("Warning: yt-dlp not found. Please install it: %v", err)
 	}
 
+	// Check if the POT provider is reachable
+	checkPotProvider()
+
 	// Send startup notification to Slack
 	go sendStartupNotification()
 
@@ -144,9 +147,133 @@ func main() {
 	}
 }
 
+const (
+	// ytdlpUserAgent wird fuer alle yt-dlp Aufrufe verwendet.
+	ytdlpUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+	// ytdlpWarnAgeDays: ab diesem Alter ist mit HTTP 403 von YouTube zu rechnen.
+	ytdlpWarnAgeDays = 60
+
+	cookiesPath = "/app/cookies.txt"
+)
+
 func checkYtDlp() error {
-	cmd := exec.Command("yt-dlp", "--version")
-	return cmd.Run()
+	version := ytdlpVersion()
+	if version == "" {
+		return fmt.Errorf("yt-dlp konnte nicht ausgefuehrt werden")
+	}
+
+	log.Printf("[Startup] yt-dlp version: %s", version)
+	if age := ytdlpAgeDays(version); age > ytdlpWarnAgeDays {
+		log.Printf("[Startup] WARNUNG: yt-dlp ist %d Tage alt. YouTube antwortet auf veraltete Versionen mit HTTP 403 - Image neu bauen.", age)
+	}
+
+	return nil
+}
+
+// ytdlpVersion liefert die installierte yt-dlp Version, "" bei Fehler.
+func ytdlpVersion() string {
+	output, err := exec.Command("yt-dlp", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// ytdlpAgeDays berechnet das Alter aus der datumsbasierten Version
+// (z.B. "2026.02.04"). -1 wenn die Version nicht lesbar ist.
+func ytdlpAgeDays(version string) int {
+	parts := strings.Split(version, ".")
+	if len(parts) < 3 {
+		return -1
+	}
+
+	released, err := time.Parse("2006.01.02", strings.Join(parts[:3], "."))
+	if err != nil {
+		return -1
+	}
+
+	return int(time.Since(released).Hours() / 24)
+}
+
+// potProviderStatus prueft den bgutil POT-Provider und liefert eine lesbare
+// Statusmeldung samt Ergebnis. Ohne PO-Token lehnt YouTube die meisten
+// Formate mit HTTP 403 ab.
+func potProviderStatus() (string, bool) {
+	bgutilURL := os.Getenv("BGUTIL_BASE_URL")
+	if bgutilURL == "" {
+		// yt-dlp faellt sonst auf 127.0.0.1:4416 zurueck - im Container
+		// laeuft dort nichts.
+		return "BGUTIL_BASE_URL ist nicht gesetzt", false
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(strings.TrimSuffix(bgutilURL, "/") + "/ping")
+	if err != nil {
+		return fmt.Sprintf("%s nicht erreichbar: %v", bgutilURL, err), false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("%s antwortet mit Status %d", bgutilURL, resp.StatusCode), false
+	}
+
+	return fmt.Sprintf("erreichbar (%s)", bgutilURL), true
+}
+
+// checkPotProvider loggt den POT-Provider-Status beim Start.
+func checkPotProvider() {
+	status, ok := potProviderStatus()
+	if ok {
+		log.Printf("[Startup] POT-Provider %s", status)
+		return
+	}
+
+	log.Printf("[Startup] WARNUNG: POT-Provider: %s. Ohne PO-Token scheitern die meisten Downloads mit HTTP 403.", status)
+}
+
+// resolveCookiesPath liefert den Pfad zur Cookie-Datei, oder "" wenn keine
+// brauchbare vorhanden ist. Docker legt bei einem Bind-Mount auf eine fehlende
+// Host-Datei ein Verzeichnis an - ein blosses os.Stat reicht hier also nicht.
+func resolveCookiesPath() string {
+	info, err := os.Stat(cookiesPath)
+	if err != nil {
+		return ""
+	}
+
+	if info.IsDir() {
+		log.Printf("[Cookies] WARNUNG: %s ist ein Verzeichnis statt einer Datei - Cookies werden ignoriert. Auf dem Host eine echte cookies.txt anlegen.", cookiesPath)
+		return ""
+	}
+
+	if info.Size() == 0 {
+		log.Printf("[Cookies] WARNUNG: %s ist leer - Cookies werden ignoriert.", cookiesPath)
+		return ""
+	}
+
+	return cookiesPath
+}
+
+// commonYtDlpArgs liefert die Argumente, die jeder yt-dlp Aufruf braucht.
+func commonYtDlpArgs() []string {
+	args := []string{
+		"--user-agent", ytdlpUserAgent,
+		"--no-playlist",
+		"--js-runtimes", "node",
+	}
+
+	// Cookies (noetig fuer altersbeschraenkte Videos)
+	if cookies := resolveCookiesPath(); cookies != "" {
+		args = append(args, "--cookies", cookies)
+	}
+
+	// bgutil POT-Provider (Docker-Compose-Networking). Ohne PO-Token
+	// antwortet YouTube auf die meisten Formate mit HTTP 403.
+	if bgutilURL := os.Getenv("BGUTIL_BASE_URL"); bgutilURL != "" {
+		args = append(args, "--extractor-args", "youtubepot-bgutilhttp:base_url="+bgutilURL)
+	}
+
+	return args
 }
 
 // removeEmojis removes all emoji characters from a string
@@ -719,23 +846,7 @@ func downloadVideo(url, format, sessionID string) (string, error) {
 
 	var args []string
 
-	// Common args for all formats
-	commonArgs := []string{
-		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		"--no-playlist",
-		"--js-runtimes", "node",
-	}
-
-	// Use cookies file if available (needed for age-restricted videos)
-	cookiesPath := "/app/cookies.txt"
-	if _, err := os.Stat(cookiesPath); err == nil {
-		commonArgs = append(commonArgs, "--cookies", cookiesPath)
-	}
-
-	// Configure bgutil POT provider URL if set (for Docker Compose networking)
-	if bgutilURL := os.Getenv("BGUTIL_BASE_URL"); bgutilURL != "" {
-		commonArgs = append(commonArgs, "--extractor-args", "youtubepot-bgutilhttp:base_url="+bgutilURL)
-	}
+	commonArgs := commonYtDlpArgs()
 
 	switch format {
 	case "mp4":
@@ -1092,12 +1203,11 @@ func handleCheckFormats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run yt-dlp with format listing and JSON output for detailed info
-	cmd := exec.Command("yt-dlp",
-		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		"-F",
-		"--no-warnings",
-		cleanedURL)
+	// Run yt-dlp with format listing and JSON output for detailed info.
+	// Uses the same args as the download itself - without the POT provider the
+	// format list does not match what a download would actually get.
+	// Warnings stay enabled on purpose: the SABR detection below parses them.
+	cmd := exec.Command("yt-dlp", append(commonYtDlpArgs(), "-F", cleanedURL)...)
 	output, err := cmd.CombinedOutput()
 
 	response := FormatCheckResponse{
@@ -1382,21 +1492,38 @@ func sendStartupNotification() {
 	hostname, _ := os.Hostname()
 
 	// Get yt-dlp version
-	ytdlpVersion := "unknown"
-	cmd := exec.Command("yt-dlp", "--version")
-	if output, err := cmd.Output(); err == nil {
-		ytdlpVersion = strings.TrimSpace(string(output))
+	version := ytdlpVersion()
+	if version == "" {
+		version = "unknown"
+	}
+
+	// Ein veraltetes yt-dlp oder ein fehlender POT-Provider sind die beiden
+	// haeufigsten Ursachen fuer HTTP 403 - beides faellt hier auf.
+	versionLabel := version
+	statusColor := "good"
+	statusText := "🚀 Service läuft wieder"
+
+	if age := ytdlpAgeDays(version); age > ytdlpWarnAgeDays {
+		versionLabel = fmt.Sprintf("%s (%d Tage alt)", version, age)
+		statusColor = "danger"
+		statusText = "⚠️ Service läuft, aber yt-dlp ist veraltet"
+	}
+
+	potStatus, potOK := potProviderStatus()
+	if !potOK {
+		statusColor = "danger"
+		statusText = "⚠️ Service läuft, aber der POT-Provider fehlt"
 	}
 
 	message := SlackMessage{
 		Text: "✅ YouTube Downloader gestartet",
 		Attachments: []SlackAttachment{
 			{
-				Color: "good",
+				Color: statusColor,
 				Fields: []SlackField{
 					{
 						Title: "Status",
-						Value: "🚀 Service läuft wieder",
+						Value: statusText,
 						Short: true,
 					},
 					{
@@ -1411,7 +1538,12 @@ func sendStartupNotification() {
 					},
 					{
 						Title: "yt-dlp Version",
-						Value: ytdlpVersion,
+						Value: versionLabel,
+						Short: true,
+					},
+					{
+						Title: "POT-Provider",
+						Value: potStatus,
 						Short: true,
 					},
 				},

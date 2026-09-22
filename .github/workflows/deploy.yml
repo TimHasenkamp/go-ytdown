@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main  # Only deploy when pushing to main (e.g., after PR merge)
+  # Wöchentlicher Rebuild: YouTube ändert laufend die Auslieferung, ein
+  # eingefrorenes yt-dlp läuft nach einigen Wochen zwangsläufig in HTTP 403.
+  # Ohne diesen Trigger altert das Image zwischen zwei Commits unbemerkt.
+  schedule:
+    - cron: '0 4 * * 1'  # Montags 04:00 UTC
+  workflow_dispatch:
 
 env:
   IMAGE: ghcr.io/timhasenkamp/go-ytdown
@@ -40,13 +46,16 @@ jobs:
             ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Die Runtime-Stage installiert yt-dlp per pip. Käme sie aus dem Cache,
+          # würde ein frischer Build die alte yt-dlp-Version konservieren.
+          no-cache-filter: runtime
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://your-production-url.com  # Optional: Update with your URL
+      url: https://music.hasenkamp.dev
     steps:
       - name: Validate required secrets
         run: |
@@ -78,12 +87,57 @@ jobs:
 
             echo "✅ Deployment completed successfully!"
 
+      # "docker compose up -d" liefert auch dann Exit 0, wenn jeder Download
+      # scheitert. Erst dieser Schritt prüft, ob der Dienst wirklich arbeitet.
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.SERVER_DEPLOY_PATH }}
+
+            echo "⏳ Warte auf den Dienst..."
+            for i in $(seq 1 30); do
+              if docker compose exec -T ytdownloader wget -q --spider http://localhost:8080/; then
+                echo "✅ Dienst antwortet"
+                break
+              fi
+              if [ "$i" = "30" ]; then echo "❌ Dienst antwortet nicht"; exit 1; fi
+              sleep 2
+            done
+
+            echo "🔍 yt-dlp Version im Container:"
+            docker compose exec -T ytdownloader yt-dlp --version
+
+            echo "🔍 Prüfe POT-Provider..."
+            docker compose exec -T ytdownloader sh -c '
+              set -e
+              : "${BGUTIL_BASE_URL:?BGUTIL_BASE_URL ist im Container nicht gesetzt}"
+              wget -q -O- "$BGUTIL_BASE_URL/ping" > /dev/null
+            ' || { echo "❌ POT-Provider nicht erreichbar - Downloads enden in HTTP 403"; exit 1; }
+            echo "✅ POT-Provider erreichbar"
+
+            echo "🔍 Smoke-Test: löse Formate eines echten Videos auf..."
+            # --simulate lädt keine Daten, löst aber alle Format-URLs komplett
+            # auf. Genau hier schlägt ein 403 zu, falls etwas kaputt ist.
+            docker compose exec -T ytdownloader sh -c '
+              yt-dlp --no-playlist --js-runtimes node \
+                --extractor-args "youtubepot-bgutilhttp:base_url=$BGUTIL_BASE_URL" \
+                -f bestaudio --simulate \
+                "https://www.youtube.com/watch?v=BaW_jenozKc"
+            ' || { echo "❌ Smoke-Test fehlgeschlagen - Downloads funktionieren nicht"; exit 1; }
+            echo "✅ Smoke-Test bestanden"
+
       - name: Deployment summary
         run: |
           echo "### 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Deployment to production completed successfully**" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Deployment to production completed and verified**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: ${{ env.IMAGE }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo "- **Deployed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY

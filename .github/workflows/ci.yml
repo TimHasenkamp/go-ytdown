@@ -53,6 +53,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Runtime-Stage nie aus dem Cache: sonst bleibt das im Image
+          # installierte yt-dlp auf dem Stand des ersten Builds stehen.
+          no-cache-filter: runtime
 
       - name: Build summary
         run: |

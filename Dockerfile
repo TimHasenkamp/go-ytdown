@@ -33,7 +33,10 @@ COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ytdownloader .
 
 # Stage 3: Runtime
-FROM alpine:latest
+# Die Stage ist benannt, damit die CI sie per --no-cache-filter=runtime gezielt
+# ohne Cache bauen kann. Sonst wird die pip-Layer wiederverwendet und yt-dlp
+# bleibt auf dem Stand des ersten Builds stehen.
+FROM alpine:latest AS runtime
 
 # Installiere Runtime-Abhängigkeiten
 RUN apk add --no-cache \
@@ -49,6 +52,17 @@ RUN apk add --no-cache \
     && pip3 install --break-system-packages --no-cache-dir --upgrade pip \
     && pip3 install --break-system-packages --no-cache-dir "yt-dlp[default]" \
     && pip3 install --break-system-packages --no-cache-dir bgutil-ytdlp-pot-provider
+
+# Build-Gate: bricht den Build ab, wenn yt-dlp zu alt ist. Greift vor allem dann,
+# wenn die Layer oben doch aus dem Cache kam - ein veraltetes yt-dlp fuehrt bei
+# YouTube zu "HTTP Error 403: Forbidden".
+RUN yt-dlp --version && python3 -c "\
+import datetime, subprocess, sys;\
+v = subprocess.check_output(['yt-dlp', '--version']).decode().strip();\
+released = datetime.date(*map(int, v.split('.')[:3]));\
+age = (datetime.date.today() - released).days;\
+print('yt-dlp %s ist %d Tage alt' % (v, age));\
+sys.exit('FEHLER: yt-dlp ist veraltet - Build ohne Cache wiederholen' if age > 90 else 0)"
 
 # Erstelle non-root User
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
